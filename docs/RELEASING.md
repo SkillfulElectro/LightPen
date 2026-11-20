@@ -20,19 +20,28 @@ Releases are **manual and tag-driven**. Nothing is published on push.
    - `prerelease` (default `false`)
    - `draft` (default `true`) — with `false` the release is published only after
      verification succeeds.
+   - `build_macos` (default `false`) — macOS is opt-in. It is the only desktop
+     target that needs an Apple Developer certificate, and an unsigned `.dmg` is
+     blocked by Gatekeeper. Leave it off unless you have the Apple secrets.
    - `build_android` / `build_ios` (default `true`) — turn off when the signing
      secrets are not configured yet.
 
+   Every signing secret is optional: the `Prepare optional signing` step exports
+   a variable only when the secret holds a real value. An unset repository secret
+   arrives as an **empty string**, and a defined-but-empty `APPLE_CERTIFICATE`
+   makes tauri try to import `""` as a p12, which is the
+   `SecKeychainItemImport: Unable to decode the provided data` failure.
+
 3. The workflow:
 
-   | Job             | What it does                                                                                                                                                                                                       |
-   | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-   | `prepare`       | validates the tag, checks version sync, creates the release if missing, exports `release_id` / `upload_url`                                                                                                        |
-   | `build-desktop` | matrix: `windows-latest` (x64 + arm64), `macos-latest` (universal), `ubuntu-22.04`; `tauri-apps/tauri-action` uploads to the existing release, then artifacts are renamed to `LightPen_<version>_<platform>.<ext>` |
-   | `build-android` | JDK 17 + Android SDK/NDK + four Rust Android targets, `tauri android build --apk --aab`, `gh release upload --clobber`                                                                                             |
-   | `build-ios`     | `macos-latest`, optional keychain import, `tauri ios build`, uploads `.ipa` / `.app.tar.gz`                                                                                                                        |
-   | `verify`        | lists release assets, fails if an expected artifact is missing, generates and uploads `SHA256SUMS.txt`, writes a summary table                                                                                     |
-   | `publish`       | un-drafts the release when `draft=false` and verification passed                                                                                                                                                   |
+   | Job             | What it does                                                                                                                                                                                                                                |
+   | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+   | `prepare`       | validates the tag, checks version sync, creates the release if missing, exports `release_id` / `upload_url`                                                                                                                                 |
+   | `build-desktop` | matrix: `windows-latest` (x64 + arm64), `macos-latest` (universal, only when `build_macos`), `ubuntu-22.04`; `tauri-apps/tauri-action` uploads to the existing release, then artifacts are renamed to `LightPen_<version>_<platform>.<ext>` |
+   | `build-android` | JDK 17 + Android SDK/NDK + four Rust Android targets, `tauri android build --apk --aab`, `gh release upload --clobber`                                                                                                                      |
+   | `build-ios`     | `macos-latest`, optional keychain import, `tauri ios build`, uploads `.ipa` / `.app.tar.gz`                                                                                                                                                 |
+   | `verify`        | lists release assets, fails if an expected artifact is missing, generates and uploads `SHA256SUMS.txt`, writes a summary table                                                                                                              |
+   | `publish`       | un-drafts the release when `draft=false` and verification passed                                                                                                                                                                            |
 
    Every job has `timeout-minutes`, actions are pinned by full commit SHA with a
    version comment, caches cover npm / cargo / gradle (via
@@ -117,9 +126,9 @@ project was developed in. Treat these as “written and reviewed” rather than
 
 - **`release.yml` end-to-end run.** The workflow passes `actionlint` and its
   logic was reviewed, but it has never completed a run on GitHub Actions.
-  Windows/macOS/Android/iOS builds, `tauri-action` uploads, `gh release` calls
+  Windows/Android/iOS/macOS bundles, `tauri-action` uploads, `gh release` calls
   and artefact renaming are unproven. The first run should be a `draft=true` dry
-  run with `build_android=false`, `build_ios=false`.
+  run with `build_macos=false`, `build_android=false`, `build_ios=false`.
 
   The first real run then failed at two points, both now fixed and guarded:
 
@@ -128,6 +137,12 @@ project was developed in. Treat these as “written and reviewed” rather than
     `tauri build` refused to start on _every_ platform. `src/core/tauriConfig.test.ts`
     now rejects unknown targets and unknown `tauri-action` inputs; the config
     validates against Tauri's published schema.
+  - **The macOS leg failed with `SecKeychainItemImport: Unable to decode the
+provided data`.** Not a bad certificate: no certificate. The build step
+    forwarded `APPLE_CERTIFICATE`/`APPLE_CERTIFICATE_PASSWORD` (plus the Windows
+    pair) unconditionally, and an unset secret becomes an empty _string_, so the
+    variables were "set" and tauri tried to base64-decode `""` into a `.p12`.
+    Signing variables are now exported only when non-empty.
   - **The macOS job passed `--target` twice** (once in `matrix.args`, once as the
     action argument), which clap rejects. `matrix.args` is now empty and the test
     above enforces a single `--target`.
