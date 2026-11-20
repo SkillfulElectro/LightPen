@@ -128,8 +128,10 @@ See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the diagram and data flow
 ## Status
 
 `0.1.0` — every feature in the brief is implemented and the automated gates
-(types, lint, format, 62 unit tests, ≥ 80 % core coverage, actionlint on both
-workflows, web production build) pass locally. Things that could not be executed
+(types, lint, format, 73 unit tests, 99 % statements / 95 % branches on
+`src/core`, actionlint on both workflows, web production build) pass locally.
+Annotated-PDF export was additionally validated outside the browser by parsing
+and rendering the output with pypdf and pypdfium2. Things that could not be executed
 in the development environment — Rust compilation, `tauri dev`, Playwright e2e,
 real-webcam tracking, Android/iOS builds and a live run of `release.yml` — are
 listed explicitly under **Unverified** in [`docs/RELEASING.md`](docs/RELEASING.md).

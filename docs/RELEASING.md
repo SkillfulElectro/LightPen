@@ -130,6 +130,15 @@ project was developed in. Treat these as “written and reviewed” rather than
 - **Playwright e2e** — the tests are written against the real UI, but the browser
   binary could not be downloaded in the development sandbox, so they were not
   executed here. CI installs Chromium and runs them.
+- **Rotated pages**: the viewer now maps coordinates through matrices that
+  match pdf.js for 0/90/180/270 (asserted against `getViewport` in jsdom), and
+  exported rotation PDFs were rendered and inspected with an independent
+  renderer (pypdfium2). Still worth a real-device check with a scanned,
+  rotated document.
+- **Annotated-PDF export** was verified end to end outside the browser: the
+  export output was parsed with pypdf and rendered with pypdfium2, showing the
+  vector ink at the intended page position as an open stroked polyline. Opening
+  the same file in Acrobat/Firefox/Preview is still a manual QA item.
 - **Hand tracking with a real webcam** — no camera in the development sandbox.
   Gesture classification, filtering, coordinate mapping and the ink pipeline are
   unit-tested with synthetic landmarks, but the FPS numbers in
