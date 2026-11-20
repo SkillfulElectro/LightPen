@@ -1,0 +1,29 @@
+name: Feature request
+description: Suggest an improvement for LightPen
+labels: ['enhancement']
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem would this solve?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+  - type: checkboxes
+    id: constraints
+    attributes:
+      label: Constraints
+      options:
+        - label: This works fully offline (no CDN, no telemetry, no remote models)
+          required: true
+        - label: This keeps the app usable without a camera
+          required: true
