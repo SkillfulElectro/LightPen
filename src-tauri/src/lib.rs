@@ -49,7 +49,9 @@ fn read_open_file(path: String) -> Result<Option<OpenFile>, String> {
         return Ok(None);
     }
     if meta.len() > MAX_OPEN_WITH_BYTES {
-        return Err("This PDF is too large to open from the file association. Use Open PDF instead.".into());
+        return Err(
+            "This PDF is too large to open from the file association. Use Open PDF instead.".into(),
+        );
     }
     let bytes = std::fs::read(&path).map_err(|e| format!("cannot read file: {e}"))?;
     let name = std::path::Path::new(&path)
@@ -200,7 +202,8 @@ pub fn run() {
             use tauri::Emitter;
             for url in urls {
                 if let Ok(path) = url.to_file_path() {
-                    let _ = _app_handle.emit("lightpen:open-path", path.to_string_lossy().to_string());
+                    let _ =
+                        _app_handle.emit("lightpen:open-path", path.to_string_lossy().to_string());
                 }
             }
         }

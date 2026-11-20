@@ -271,10 +271,10 @@ jobs:
           [[ -d "$bundle_dir" ]] || bundle_dir="src-tauri/target/release/bundle"
           mkdir -p renamed
           ext_of() { case "$1" in *.tar.gz) echo "app.tar.gz";; *) echo "${1##*.}";; esac; }
-          for f in $(find "$bundle_dir" -type f \( -name "*.deb" -o -name "*.rpm" -o -name "*.AppImage" -o -name "*.dmg" -o -name "*.app.tar.gz" \) 2>/dev/null); do
+          while IFS= read -r -d '' f; do
             ext=$(ext_of "$f")
             cp "$f" "renamed/LightPen_${VERSION}_${{ matrix.name }}.${ext}"
-          done
+          done < <(find "$bundle_dir" -type f \( -name "*.deb" -o -name "*.rpm" -o -name "*.AppImage" -o -name "*.dmg" -o -name "*.app.tar.gz" \) -print0 2>/dev/null)
           ls -l renamed || true
 
       - name: Normalise artifact names (Windows)
@@ -318,12 +318,16 @@ jobs:
           {
             echo "### Desktop — ${{ matrix.name }}"
             echo ""
+            # A single `case` decides everything: `[[ "${{ matrix.os }}" == macos-* ]]
+            # would be rejected by shellcheck (SC2193), because actionlint replaces
+            # the expression with underscores and the pattern can then never match.
+            signable=false
             case "${{ matrix.os }}" in
-              macos-*) signed="${APPLE_CERTIFICATE:-}" ;;
-              windows-*) signed="${WINDOWS_CERTIFICATE:-}" ;;
+              macos-*) signed="${APPLE_CERTIFICATE:-}" ; signable=true ;;
+              windows-*) signed="${WINDOWS_CERTIFICATE:-}" ; signable=true ;;
               *) echo "✅ Linux bundles are not code-signed (not applicable)." ; signed="" ;;
             esac
-            if [[ "${{ matrix.os }}" == macos-* || "${{ matrix.os }}" == windows-* ]]; then
+            if [[ "$signable" == "true" ]]; then
               if [[ -z "$signed" ]]; then
                 echo "⚠️ No code-signing certificate configured — this artifact is **unsigned**."
               else
@@ -510,6 +514,8 @@ jobs:
           security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN" -P "$APPLE_CERTIFICATE_PASSWORD" \
             -T /usr/bin/codesign -T /usr/bin/security
           security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          # Unquoted on purpose: each existing keychain must become its own argument.
+          # shellcheck disable=SC2046
           security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
 
       - name: Write App Store Connect API key (optional)
@@ -664,13 +670,18 @@ jobs:
           gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir release-assets --pattern "*" --clobber
           cd release-assets
           rm -f SHA256SUMS.txt
-          files=$(ls -1 | grep -v '^SHA256SUMS.txt$' || true)
-          if [[ -z "$files" ]]; then
+          shopt -s nullglob
+          files=()
+          for f in *; do
+            [[ "$f" == "SHA256SUMS.txt" ]] && continue
+            [[ -f "$f" ]] || continue
+            files+=("$f")
+          done
+          if (( ${#files[@]} == 0 )); then
             echo "::error::No assets to checksum."
             exit 1
           fi
-          # shellcheck disable=SC2086
-          sha256sum $files | tee SHA256SUMS.txt
+          sha256sum "${files[@]}" | tee SHA256SUMS.txt
           gh release upload "$TAG" SHA256SUMS.txt --clobber --repo "$GITHUB_REPOSITORY"
 
       - name: Job summary

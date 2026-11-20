@@ -117,6 +117,7 @@ absent.
 
 ```bash
 npm run lint && npm run typecheck && npm run test:coverage
+npm audit --audit-level=high
 npm run test:e2e
 cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
 cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
@@ -131,6 +132,15 @@ npx actionlint .github/workflows/*.yml
 Honest status of things that could **not** be executed in the environment this
 project was developed in. Treat these as “written and reviewed” rather than
 “proven”:
+
+- **The `actionlint` CI job only ever passed locally by accident.** Local checks
+  used the WASM build of actionlint, which cannot spawn `shellcheck`; CI's native
+  binary runs it on every `run:` block at _all_ severities. Five warnings were
+  therefore invisible locally (unquoted `find` loop, a `[[ "${{ matrix.os }}" ==
+macos-* ]]` pattern that can never match once actionlint substitutes the
+  expression with underscores, an unquoted command substitution, and an
+  `ls | grep`). All five are fixed and the check is now reproduced locally with
+  shellcheck directly.
 
 - **`release.yml` end-to-end run.** The workflow passes `actionlint` and its
   logic was reviewed, and the first real run did build and upload the unsigned
