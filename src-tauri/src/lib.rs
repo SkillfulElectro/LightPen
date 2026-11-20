@@ -12,7 +12,9 @@
 //! - "open with" only reads files whose extension is `.pdf`, with a size cap.
 
 #![forbid(unsafe_code)]
-#![cfg_attr(not(debug_assertions), deny(warnings))]
+// Deliberately no `deny(warnings)` in release: with it, a new deprecation or an
+// `unused_imports` inside a dependency's macro expansion fails the whole release
+// build. Warnings are printed; `cargo clippy -D warnings` in CI is the gate.
 
 use serde::Serialize;
 
@@ -61,7 +63,7 @@ fn read_open_file(path: String) -> Result<Option<OpenFile>, String> {
 /// Native application menu (macOS gets the standard app menu with About/Quit).
 #[cfg(desktop)]
 fn build_menu(app: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
-    use tauri::menu::{AboutMetadata, MenuBuilder, MenuItemBuilder, SubmenuBuilder};
+    use tauri::menu::{AboutMetadata, MenuBuilder, SubmenuBuilder};
 
     let about = AboutMetadata {
         name: Some("LightPen".into()),
@@ -93,11 +95,22 @@ fn build_menu(app: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::
         .text("fit_page", "Fit Page")
         .build()?;
 
+    // Help owns the About item. macOS shows it in the application menu instead,
+    // where `.about(...)` below puts it with the proper role handler — hence the
+    // cfg split. macOS never gets both.
+    #[cfg(not(target_os = "macos"))]
     let help = SubmenuBuilder::new(app, "Help")
         .text("tutorial", "Tutorial")
         .text("cheat_sheet", "Gesture Cheat Sheet")
         .text("shortcuts", "Keyboard Shortcuts")
-        .item(&MenuItemBuilder::with_id("about_lightpen", "About LightPen").build(app)?)
+        .separator()
+        .about(Some(about.clone()))
+        .build()?;
+    #[cfg(target_os = "macos")]
+    let help = SubmenuBuilder::new(app, "Help")
+        .text("tutorial", "Tutorial")
+        .text("cheat_sheet", "Gesture Cheat Sheet")
+        .text("shortcuts", "Keyboard Shortcuts")
         .build()?;
 
     let app_menu = SubmenuBuilder::new(app, "LightPen")
@@ -167,6 +180,9 @@ pub fn run() {
             .menu(|app| build_menu(app))
             .on_menu_event(|app, event| forward_menu_event(app, event.id()))
             .setup(|app| {
+                use tauri::Manager;
+                // `get_webview_window` comes from the `Manager` trait; without the
+                // import this is E0599 ("no method named get_webview_window").
                 let _ = app.get_webview_window("main");
                 emit_cli_file(app.handle());
                 Ok(())

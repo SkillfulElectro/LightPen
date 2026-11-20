@@ -132,6 +132,27 @@ project was developed in. Treat these as “written and reviewed” rather than
     action argument), which clap rejects. `matrix.args` is now empty and the test
     above enforces a single `--target`.
 
+  - **`lib.rs` used `get_webview_window` without importing `tauri::Manager`**
+    (E0599). Fixed, and `deny(warnings)` in release mode was downgraded to
+    `warn(warnings)` so a future deprecation inside a dependency macro cannot
+    fail a release build.
+  - **The iOS job exported half a signing setup.** It always set
+    `APPLE_API_KEY_ID`/`APPLE_API_ISSUER`/`APPLE_API_KEY_PATH` while signing was
+    off; the CLI treats a _partial_ credential set as an error
+    ("APPLE_API_KEY, APPLE_API_ISSUER and APPLE_API_KEY_PATH must be provided for
+    code signing"). All four are now gated on one `HAS_IOS_SIGNING` flag that
+    requires the certificate _and_ the API key, and `--no-sign` is passed after
+    `--` so npm does not swallow it.
+  - **`Install Android NDK` failed with "Broken pipe".** `yes | sdkmanager ... >
+/dev/null` plus `pipefail` reports SIGPIPE from `yes` once sdkmanager exits.
+    `setup-android` already accepts the licences, so the pipe is gone; the step
+    also verifies the NDK directory exists and exports `NDK_HOME` **and**
+    `ANDROID_NDK_HOME`.
+  - **Android signing config was written to a file nothing read**
+    (`android-keystore.properties` in the repo root). It now goes to
+    `src-tauri/gen/android/keystore.properties` _and_ injects a `release`
+    signingConfig into the generated Gradle build — without the Gradle half,
+    Gradle emits an unsigned release APK.
   - **The pinned Rust 1.82 could not build the current dependency graph.** A
     clean build re-resolves `tauri = "2"` to 2.12.x (MSRV **1.90**) and picked
     `cssparser-macros 0.7.1`, which needs `edition2024` — cargo 1.82 cannot parse
