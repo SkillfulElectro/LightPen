@@ -8,6 +8,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useStore } from '../store/useStore';
+import { startTracking } from './trackingHandle';
 
 type Exercise = 'hover' | 'write' | 'erase' | 'swipe' | 'pause';
 const EXERCISES: Exercise[] = ['hover', 'write', 'erase', 'swipe', 'pause'];
@@ -158,11 +159,27 @@ export default function Tutorial() {
               <p className="privacy-note">{t('tutorial.privacy')}</p>
             </>
           )}
-          {step === 1 && <p>{t('tutorial.permission')}</p>}
+          {step === 1 && (
+            <>
+              <p>{t('tutorial.permission')}</p>
+              <p className="privacy-note">{t('tutorial.privacy')}</p>
+              <button
+                type="button"
+                className="btn-primary"
+                onClick={() => {
+                  void startTracking();
+                  setStep(2);
+                }}
+              >
+                {t('camera.allow')}
+              </button>
+            </>
+          )}
           {step === 2 && <p>{t('tutorial.placement')}</p>}
           {step === 3 && (
             <>
               <p>{t('tutorial.calibration')}</p>
+              <p className="sandbox-hint">{t('tutorial.calibrationHint')}</p>
               <CalibrationBox rect={calRect} onChange={setCalRect} />
             </>
           )}

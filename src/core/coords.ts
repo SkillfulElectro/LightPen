@@ -90,3 +90,34 @@ export function trackingHint(handSize: number): 'too-far' | 'too-close' | null {
   if (handSize > 0.45) return 'too-close';
   return null;
 }
+
+/**
+ * Average luminance of a video frame (0 = black, 1 = white).
+ * Samples a coarse grid so it costs well under a millisecond.
+ * Used for the "low light" hint; the frame never leaves memory.
+ */
+export function frameBrightness(
+  readPixel: (x: number, y: number) => [number, number, number],
+  width: number,
+  height: number,
+  grid = 8,
+): number {
+  if (width <= 0 || height <= 0) return 1;
+  let total = 0;
+  let count = 0;
+  for (let gx = 0; gx < grid; gx++) {
+    for (let gy = 0; gy < grid; gy++) {
+      const x = Math.floor(((gx + 0.5) / grid) * width);
+      const y = Math.floor(((gy + 0.5) / grid) * height);
+      const [r, g, b] = readPixel(x, y);
+      total += (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
+      count += 1;
+    }
+  }
+  return count > 0 ? total / count : 1;
+}
+
+/** True when the frame is too dark for reliable hand tracking. */
+export function isLowLight(brightness: number): boolean {
+  return brightness < 0.12;
+}

@@ -10,7 +10,7 @@ import { useTranslation } from 'react-i18next';
 import { addPoint, createStroke, hexToRgb } from '../core/annotations';
 import { canvasToPage, clampToPage, pageToCanvas } from '../core/coords';
 import type { PageSize, Stroke } from '../core/types';
-import { loadPdf, usePageRenderer, type PdfErrorKind } from '../hooks/usePdfDocument';
+import { getPageSize, loadPdf, usePageRenderer, type PdfErrorKind } from '../hooks/usePdfDocument';
 import { restoreAnnotations, useStore } from '../store/useStore';
 import { openPdfFile } from '../platform/tauri';
 
@@ -57,6 +57,11 @@ export default function PdfViewer({ pdfBytes, pdfName, onPdfLoaded }: Props) {
         setPageSizes(loaded.pageSizes);
         onPdfLoaded(pdfName ?? 'document.pdf', pdfBytes, loaded.pageCount, loaded.pageSizes);
         await restoreAnnotations(pdfName ?? 'document.pdf');
+        // Validate annotations against the real page count: a sidecar from a
+        // different document must not create strokes on pages that do not exist.
+        const store = useStore.getState().annotations;
+        const stray = store.all.filter((s) => s.page >= loaded.pageCount);
+        if (stray.length > 0) store.clearAll();
       })
       .catch((err: unknown) => {
         if (cancelled) return;
@@ -93,10 +98,30 @@ export default function PdfViewer({ pdfBytes, pdfName, onPdfLoaded }: Props) {
     return () => ro.disconnect();
   }, []);
 
-  const pageSize = useMemo<PageSize>(
-    () => pageSizes[currentPage] ?? { width: 612, height: 792 },
-    [pageSizes, currentPage],
-  );
+  // Fallback size for pages whose dimensions have not been read yet.
+  const [dynSize, setDynSize] = useState<PageSize | null>(null);
+  const pageSize = useMemo<PageSize>(() => {
+    const known = pageSizes[currentPage];
+    if (known && known.width !== 612) return known;
+    return dynSize ?? { width: 612, height: 792 };
+  }, [pageSizes, currentPage, dynSize]);
+
+  // Read the size of the visible page on demand (large documents are lazy).
+  useEffect(() => {
+    if (!doc) return;
+    let cancelled = false;
+    setDynSize(null);
+    getPageSize(doc, currentPage, pageSizes)
+      .then((size) => {
+        if (!cancelled) setDynSize(size);
+      })
+      .catch(() => {
+        // Keep the Letter fallback; the render path reports real errors.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [doc, currentPage, pageSizes]);
   const scale =
     fitMode === 'fit-width'
       ? Math.max((containerWidth - 32) / pageSize.width, 0.1)

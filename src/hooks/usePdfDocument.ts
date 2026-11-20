@@ -34,15 +34,33 @@ export async function loadPdf(bytes: Uint8Array): Promise<LoadedPdf> {
     err.kind = 'too-large';
     throw err;
   }
-  const doc = await pdfjs.getDocument({ data: bytes.slice() }).promise;
-  const pageSizes: PageSize[] = [];
-  for (let i = 1; i <= doc.numPages; i++) {
+  const doc = await pdfjs.getDocument({ data: bytes.slice(), isEvalSupported: false }).promise;
+  // Read page sizes lazily: large documents are not fully parsed up front.
+  const pageSizes: PageSize[] = new Array<PageSize>(doc.numPages).fill({ width: 612, height: 792 });
+  const probe = Math.min(doc.numPages, 5);
+  for (let i = 1; i <= probe; i++) {
     const page = await doc.getPage(i);
     const viewport = page.getViewport({ scale: 1 });
-    pageSizes.push({ width: viewport.width, height: viewport.height });
+    pageSizes[i - 1] = { width: viewport.width, height: viewport.height };
     page.cleanup();
   }
   return { doc, pageCount: doc.numPages, pageSizes };
+}
+
+/** Page size of an arbitrary page, loading it on demand and caching the result. */
+export async function getPageSize(
+  doc: pdfjs.PDFDocumentProxy,
+  pageIndex: number,
+  cache: PageSize[],
+): Promise<PageSize> {
+  const cached = cache[pageIndex];
+  if (cached && cached.width !== 612) return cached;
+  const page = await doc.getPage(pageIndex + 1);
+  const viewport = page.getViewport({ scale: 1 });
+  const size = { width: viewport.width, height: viewport.height };
+  page.cleanup();
+  cache[pageIndex] = size;
+  return size;
 }
 
 /**

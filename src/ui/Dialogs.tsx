@@ -2,6 +2,7 @@
 
 import { useTranslation } from 'react-i18next';
 import { useStore } from '../store/useStore';
+import { startTracking } from './trackingHandle';
 
 function Modal({
   title,
@@ -48,8 +49,7 @@ export function PermissionDialog() {
           className="btn-primary"
           onClick={() => {
             setOpen(false);
-            // CameraPreview start is triggered from the camera panel button;
-            // here we just close the rationale. The panel is always visible.
+            void startTracking();
           }}
         >
           {t('camera.allow')}

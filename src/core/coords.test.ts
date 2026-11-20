@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { cameraToPage, canvasToPage, clampToPage, pageToCanvas, trackingHint } from './coords';
+import {
+  cameraToPage,
+  canvasToPage,
+  clampToPage,
+  frameBrightness,
+  isLowLight,
+  pageToCanvas,
+  trackingHint,
+} from './coords';
 
 const PAGE = { width: 612, height: 792 }; // US Letter in points
 
@@ -77,5 +85,23 @@ describe('edge cases', () => {
   it('clampToPage keeps points inside the page', () => {
     const page = { width: 100, height: 100 };
     expect(clampToPage({ x: -5, y: 150 }, page)).toEqual({ x: 0, y: 100 });
+  });
+});
+
+describe('lighting heuristics', () => {
+  it('averages pixel luminance and flags dark frames', () => {
+    const dark = frameBrightness(() => [0, 0, 0], 64, 48);
+    expect(dark).toBe(0);
+    expect(isLowLight(dark)).toBe(true);
+
+    const bright = frameBrightness(() => [255, 255, 255], 64, 48);
+    expect(bright).toBeCloseTo(1);
+    expect(isLowLight(bright)).toBe(false);
+
+    expect(isLowLight(frameBrightness(() => [128, 128, 128], 64, 48))).toBe(false);
+  });
+
+  it('returns 1 (not dark) for a degenerate frame', () => {
+    expect(frameBrightness(() => [0, 0, 0], 0, 0)).toBe(1);
   });
 });

@@ -10,7 +10,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { addPoint, createStroke } from '../core/annotations';
-import { cameraToPage, clampToPage, trackingHint } from '../core/coords';
+import {
+  cameraToPage,
+  clampToPage,
+  frameBrightness,
+  isLowLight,
+  trackingHint,
+} from '../core/coords';
 import { GestureClassifier } from '../core/gesture';
 import { OneEuroPoint } from '../core/oneEuro';
 import type { PageSize, Stroke } from '../core/types';
@@ -24,6 +30,7 @@ import {
 } from '../platform/camera';
 import { closeHandLandmarker, detectHand, getHandLandmarker } from '../platform/mediapipe';
 import { useStore } from '../store/useStore';
+import { registerTrackingStarter } from './trackingHandle';
 
 interface Props {
   pageSize: PageSize;
@@ -97,6 +104,14 @@ export default function CameraPreview({ pageSize, onGesture }: Props) {
         dCutoff: settings.smoothingDCutoff,
       });
       let activeStroke: Stroke | null = null;
+      // Coarse offscreen canvas for luminance sampling (never leaves memory).
+      const lightCanvas = document.createElement('canvas');
+      lightCanvas.width = 64;
+      lightCanvas.height = 48;
+      const lightCtx = lightCanvas.getContext('2d', { willReadFrequently: true });
+      let lowLight = false;
+      let lastLightCheck = 0;
+
       let lostFrames = 0;
       let frameSkip = 0;
       let adaptiveSkip = 1;
@@ -119,13 +134,29 @@ export default function CameraPreview({ pageSize, onGesture }: Props) {
           drawOverlay(video, result?.landmarks ?? null);
           if (!result) {
             lostFrames += 1;
-            setTracking({ handPresent: false });
+            // After ~1 s without a hand, tell the user it is probably out of frame.
+            setTracking({ handPresent: false, hint: lostFrames > 30 ? 'out-of-frame' : null });
             // Debounce hand-loss: tolerate a few dropped frames before ending a stroke.
             if (lostFrames > 8) finishStroke();
             useStore.setState({ handCursor: null });
             return;
           }
           lostFrames = 0;
+          // Low-light hint: sample a small grid at most twice a second.
+          if (lightCtx && nowMs - lastLightCheck > 500) {
+            lastLightCheck = nowMs;
+            lightCtx.drawImage(video, 0, 0, lightCanvas.width, lightCanvas.height);
+            const { data } = lightCtx.getImageData(0, 0, lightCanvas.width, lightCanvas.height);
+            const brightness = frameBrightness(
+              (x, y) => {
+                const i = (y * lightCanvas.width + x) * 4;
+                return [data[i] ?? 0, data[i + 1] ?? 0, data[i + 2] ?? 0];
+              },
+              lightCanvas.width,
+              lightCanvas.height,
+            );
+            lowLight = isLowLight(brightness);
+          }
           // Dominant-hand filtering.
           if (
             settings.dominantHand !== 'auto' &&
@@ -136,7 +167,7 @@ export default function CameraPreview({ pageSize, onGesture }: Props) {
           }
           setTracking({ handPresent: true });
           const g = classifier.classify(result.landmarks, nowMs);
-          setTracking({ hint: trackingHint(g.handSize) });
+          setTracking({ hint: trackingHint(g.handSize) ?? (lowLight ? 'low-light' : null) });
           onGesture?.(g.kind);
 
           const smoothed = smoother.filter(g.indexTip.x, g.indexTip.y, nowMs);
@@ -202,6 +233,9 @@ export default function CameraPreview({ pageSize, onGesture }: Props) {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [settings, pageSize, currentPage]);
+
+  // Let the permission dialog trigger tracking.
+  useEffect(() => registerTrackingStarter(start), [start]);
 
   // Privacy: stop the stream when the page is hidden.
   useEffect(() => {
@@ -342,7 +376,15 @@ export default function CameraPreview({ pageSize, onGesture }: Props) {
       )}
       {hint && (
         <p className="camera-hint" role="status">
-          {t(`camera.hint${hint === 'too-far' ? 'TooFar' : 'TooClose'}`)}
+          {t(
+            hint === 'too-far'
+              ? 'camera.hintTooFar'
+              : hint === 'too-close'
+                ? 'camera.hintTooClose'
+                : hint === 'out-of-frame'
+                  ? 'camera.hintOutOfFrame'
+                  : 'camera.hintLowLight',
+          )}
         </p>
       )}
       <p className="camera-privacy">{t('camera.privacy')}</p>
