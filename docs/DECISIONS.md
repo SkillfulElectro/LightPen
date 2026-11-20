@@ -298,3 +298,46 @@ never inks, a tap never leaves a dot, two fingers never draw). The two-finger
 pose that air mode uses for erasing is taken by scrolling in touch mode — which
 is why the mode is a choice and air mode is still the default: switching the
 default would silently change the meaning of a gesture for existing users.
+
+## ADR-023 — The Linux webview camera permission is granted in Rust
+
+**Context.** On CachyOS (Arch) the app reported “camera permission was
+denied” the moment tracking started, with no prompt ever shown. That was
+not the user, the OS, PipeWire, or the `video` group: WebKitGTK denies
+every `permission-request` that nobody answers (an unhandled
+`WebKitUserMediaPermissionRequest` is denied by default), and
+wry only connects that signal when the app installs a permission handler.
+LightPen installed none, so `getUserMedia({ video: true })` rejected with
+`NotAllowedError` on _every_ Linux build. The same class of bug was
+already fixed on Android (`scripts/patch-android-permissions.mjs` grants
+the WebView `PermissionRequest`); the desktop WebKitGTK equivalent was
+missing. This is also why the old `camera.denied` copy was misleading on
+Linux: it implied a browser/OS toggle the user could flip, and none
+exists.
+
+**Decision.** `src-tauri/src/lib.rs` registers
+`Builder::on_permission_request` (Tauri ≥ 2.12, pinned as the floor in
+`Cargo.toml` for both `tauri` and `tauri-build`) with a pure, unit-tested
+decision function: `PermissionKind::Camera → Allow`, everything else →
+`Default` (the webview's deny-by-default).
+
+**Why granting without a second prompt is right here.** The webview loads
+only this app's own bundle under a `'self'`-only CSP, and the frontend
+only calls `getUserMedia` after the user presses “Allow camera” /
+“Start camera” — that click, preceded by the rationale dialog, _is_ the
+consent. The microphone is deliberately not granted (capture is always
+`audio: false`). Platform prompts still apply on top: macOS TCC via
+`NSCameraUsageDescription`, Android's runtime permission, and any
+PipeWire/portal or `/dev/video*` access control on Linux.
+
+**Consequences.** Remaining Linux failures are now genuine environment
+problems, and the messages say so with distro-correct fixes: the
+`no-capture` message names `pacman -S gst-plugins-good
+gst-plugin-pipewire` (Arch/CachyOS) alongside the Debian names, the
+`denied` message points at system settings / the `video` group, and the
+`.deb`/`.rpm` bundles declare their GStreamer capture dependencies
+instead of assuming a full desktop install already has them. The AppImage
+keeps bundling the media framework (ADR in `RELEASING.md`). Text guards
+in `src/core/tauriConfig.test.ts` fail if the handler, the camera-only
+scope, the Tauri floor, or the package dependencies are ever dropped;
+the decision itself is unit-tested in `lib.rs`.

@@ -21,7 +21,11 @@ const conf = JSON.parse(read('src-tauri/tauri.conf.json')) as {
   bundle: {
     targets: string[];
     active: boolean;
-    linux: { appimage: { bundleMediaFramework: boolean } };
+    linux: {
+      appimage: { bundleMediaFramework: boolean };
+      deb: { depends: string[] };
+      rpm: { depends: string[] };
+    };
   };
   build: { frontendDist: string };
   app: { security: { capabilities: string[] } };
@@ -82,6 +86,56 @@ describe('tauri.conf.json', () => {
   it('references capability files that exist', () => {
     for (const name of conf.app.security.capabilities) {
       expect(() => read(`src-tauri/capabilities/${name}.json`)).not.toThrow();
+    }
+  });
+
+  it('declares the GStreamer capture plugins as .deb/.rpm dependencies', () => {
+    // .deb/.rpm use the *system* plugins (unlike the AppImage above), and
+    // WebKitGTK finds no camera without v4l2/pipewire sources: on a minimal
+    // install (e.g. CachyOS/Arch-style package selection, or a slim Debian)
+    // nothing else pulls them in. Package names differ per family.
+    expect(conf.bundle.linux.deb.depends).toContain('gstreamer1.0-plugins-good');
+    expect(conf.bundle.linux.deb.depends).toContain('gstreamer1.0-pipewire');
+    expect(conf.bundle.linux.rpm.depends).toContain('gstreamer1-plugins-good');
+    expect(conf.bundle.linux.rpm.depends).toContain('pipewire-gstreamer');
+  });
+});
+
+describe('Linux webview camera permission (src-tauri)', () => {
+  // Regression guard for “camera permission is not granted” on CachyOS:
+  // WebKitGTK denies every permission-request nobody answers, so without
+  // the handler below getUserMedia rejected NotAllowedError on all Linux
+  // builds — with no prompt the user could have granted. These are text
+  // guards because this environment has no Rust toolchain; the behaviour
+  // itself is unit-tested in lib.rs (`permission_response` tests).
+  const libRs = () => read('src-tauri/src/lib.rs');
+
+  it('answers the webview permission request', () => {
+    expect(libRs()).toContain('.on_permission_request(');
+    expect(libRs()).toContain('permission_response(kind)');
+  });
+
+  it('allows only the camera, never the microphone', () => {
+    const code = libRs();
+    expect(code).toContain('PermissionKind::Camera => PermissionResponse::Allow');
+    // LightPen always captures with `audio: false`; granting the mic
+    // would be privilege the app never uses.
+    expect(code).not.toMatch(/PermissionKind::Microphone\s*=>\s*PermissionResponse::Allow/);
+    expect(code).toContain('_ => PermissionResponse::Default');
+  });
+
+  it('pins Tauri >= 2.12, the first release with on_permission_request', () => {
+    const cargo = read('src-tauri/Cargo.toml');
+    for (const crate of ['tauri', 'tauri-build']) {
+      const version = new RegExp(`^${crate}\\s*=\\s*\\{\\s*version\\s*=\\s*"([^"]+)"`, 'm').exec(
+        cargo,
+      )?.[1];
+      expect(version, `${crate} version`).toBeTruthy();
+      const [major = 0, minor = 0] = version!.split('.').map(Number);
+      expect(
+        major * 1000 + minor,
+        `${crate} = "${version}" predates on_permission_request (needs >= 2.12)`,
+      ).toBeGreaterThanOrEqual(2012);
     }
   });
 });

@@ -92,9 +92,43 @@ gstreamer1.0-pipewire gstreamer1.0-libav`. The release workflow then checks,
   after the build, that `libgstvideo4linux2.so` and `libgstpipewire.so` are both
   on the runner _and_ inside the produced AppImage.
 
-`.deb` and `.rpm` are not affected: they use the system plugins. Users still on
-an older AppImage can work around it with
+`.deb` and `.rpm` are not affected by the AppImage path problem: they use the
+system plugins — which is why `tauri.conf.json` now declares them
+(`gstreamer1.0-plugins-good` + `gstreamer1.0-pipewire` for `.deb`,
+`gstreamer1-plugins-good` + `pipewire-gstreamer` for `.rpm`) instead of
+assuming a full desktop install already ships them. Users still on
+an older AppImage can work around a missing media framework with
 `GST_PLUGIN_PATH=/usr/lib/gstreamer-1.0:/usr/lib64/gstreamer-1.0 ./LightPen_*.AppImage`.
+
+## Linux camera permission (WebKitGTK) — incl. CachyOS/Arch
+
+Permission is separate from the plugins above, and it is granted by the
+app, not by a system prompt: WebKitGTK denies every permission request
+nobody answers, so `src-tauri/src/lib.rs` answers it with
+`Builder::on_permission_request` (camera only; see ADR-023). That API
+needs Tauri ≥ 2.12 — `src-tauri/Cargo.toml` pins `2.12` as the floor for
+`tauri`/`tauri-build`, and `src/core/tauriConfig.test.ts` fails if the
+handler, its camera-only scope, the floor, or the dependencies above are
+dropped. Builds older than this fix cannot be repaired by any user
+setting: the user must install a fixed build.
+
+Tauri has no `pacman` bundle target, so on CachyOS/Arch the supported
+install is the **AppImage** (it bundles WebKit's media framework), or a
+source build. For a source build / `npm run tauri dev` on Arch:
+
+```bash
+sudo pacman -S --needed webkit2gtk-4.1 gst-plugins-good gst-plugin-pipewire
+# The camera device node also needs read access; group membership only
+# takes effect at the next login, so log out/in (or reboot) afterwards:
+sudo usermod -aG video "$USER"
+groups   # must list `video` in the *current* session before retesting
+```
+
+Quick triage when a Linux user still reports no camera after the fix:
+`ls -l /dev/video*`, `groups`, and whether the camera works in another
+app (e.g. a browser). “Permission denied” after the fix is a genuine
+system refusal (device node, portal, another app holding the camera);
+“no device / no capture” is the GStreamer stack above.
 
 ## Secrets
 

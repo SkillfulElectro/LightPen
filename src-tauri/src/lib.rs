@@ -17,6 +17,7 @@
 // build. Warnings are printed; `cargo clippy -D warnings` in CI is the gate.
 
 use serde::Serialize;
+use tauri::webview::{PermissionKind, PermissionResponse};
 
 /// Maximum size accepted through the "open with" path. Larger files must be
 /// opened through the file dialog (which streams through the fs plugin).
@@ -28,6 +29,37 @@ const MAX_OPEN_WITH_BYTES: u64 = 32 * 1024 * 1024;
 pub struct OpenFile {
     pub name: String,
     pub bytes: Vec<u8>,
+}
+
+/// Decide a webview permission request.
+///
+/// This is what makes the camera work on Linux (e.g. CachyOS/Arch) at all.
+/// WebKitGTK denies every `permission-request` that nobody answers, and
+/// wry/Tauri only connect that signal when a handler is installed — so with
+/// no handler, `getUserMedia({ video: true })` rejected with
+/// `NotAllowedError` on every Linux machine, no prompt ever appeared, and
+/// the UI reported “camera permission was denied” even though the user had
+/// never been asked. There is no browser or OS toggle that could undo that
+/// denial; only the embedder (this code) can answer it.
+///
+/// Only the camera is allowed, because that is the only capture the app
+/// ever requests: the frontend calls `getUserMedia` with `audio: false`
+/// and only after the user presses “Allow camera” / “Start camera”, so
+/// that click is the consent. Everything else — microphone, geolocation,
+/// notifications, … — returns `Default`, leaving the webview's own
+/// deny-by-default behaviour untouched. macOS still goes through the
+/// system TCC prompt (`NSCameraUsageDescription` in `Info.plist`) and
+/// Android still goes through the runtime permission (see
+/// `scripts/patch-android-permissions.mjs`); this handler only removes
+/// the extra webview-level veto. Documented in ADR-023.
+///
+/// Requires Tauri ≥ 2.12, the first release with
+/// `Builder::on_permission_request`; `Cargo.toml` pins that floor.
+fn permission_response(kind: PermissionKind) -> PermissionResponse {
+    match kind {
+        PermissionKind::Camera => PermissionResponse::Allow,
+        _ => PermissionResponse::Default,
+    }
 }
 
 /// Returns the app version, single-sourced from `Cargo.toml`.
@@ -171,6 +203,9 @@ fn emit_cli_file(app: &tauri::AppHandle) {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let mut builder = tauri::Builder::default()
+        // Without this, WebKitGTK denies the camera unconditionally on
+        // Linux (see `permission_response`). Applies to every webview.
+        .on_permission_request(|_, kind| permission_response(kind))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
@@ -236,5 +271,31 @@ mod tests {
     #[test]
     fn missing_file_is_an_error_not_a_panic() {
         assert!(read_open_file("/definitely/not/here.pdf".into()).is_err());
+    }
+
+    #[test]
+    fn camera_permission_is_allowed() {
+        // The regression this guards: with no (or a Default) answer,
+        // WebKitGTK denies getUserMedia on Linux before any prompt exists.
+        assert!(matches!(
+            permission_response(PermissionKind::Camera),
+            PermissionResponse::Allow
+        ));
+    }
+
+    #[test]
+    fn non_camera_permissions_keep_the_webview_default() {
+        // The app never records audio and never asks where the user is, so
+        // those requests must not be silently granted by the camera fix.
+        for kind in [
+            PermissionKind::Microphone,
+            PermissionKind::Geolocation,
+            PermissionKind::Notifications,
+        ] {
+            assert!(
+                matches!(permission_response(kind), PermissionResponse::Default),
+                "{kind:?} must stay on the webview default"
+            );
+        }
     }
 }

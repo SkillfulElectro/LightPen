@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Camera “permission not granted” on Linux (reported on CachyOS/Arch).**
+  WebKitGTK denies every webview permission request the app does not
+  answer, and LightPen never answered it, so `getUserMedia` always
+  rejected with `NotAllowedError` and no prompt ever appeared. The Tauri
+  shell now grants the camera — and only the camera — via
+  `Builder::on_permission_request` (Tauri ≥ 2.12 floor pinned in
+  `Cargo.toml`; ADR-023). Also fixed for Linux users: the `.deb`/`.rpm`
+  bundles now declare the GStreamer capture plugins they need, and the
+  camera error messages give distro-correct instructions (Arch/CachyOS:
+  `sudo pacman -S gst-plugins-good gst-plugin-pipewire`, plus the
+  `video`-group check) instead of Debian-only package names.
+  _Linux users on an older build must update/rebuild — no setting in the
+  old app can grant this permission._
+
 ### Added
 
 - Cross-platform GitHub Actions release pipeline (`release.yml`): tag validation,
