@@ -9,6 +9,9 @@ test-results/
 playwright-report/
 coverage/
 public/models/hand_landmarker.task
+# Copied from node_modules/@mediapipe/tasks-vision by scripts/copy-wasm.mjs
+# (postinstall) — generated, never committed.
+public/wasm/
 .env
 .env.*
 !.env.example
