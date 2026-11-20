@@ -20,15 +20,41 @@ Both halves are applied automatically after `npm run tauri android init`:
 npm run android:permissions
 ```
 
-`src-tauri/gen/android` is generated and gitignored, so the committed sources are
-`src-tauri/android/MainActivity.kt.tmpl` and the entries in
-`scripts/patch-android-permissions.mjs`. The script is idempotent and `release.yml`
-runs it before the Android build. It adds `CAMERA`, `android.webkit.PermissionRequest`
-and a non-required camera `uses-feature` (tablets without a camera still install
-and can draw manually), then writes the `MainActivity` below.
+`src-tauri/gen/android` is generated and gitignored, so the logic lives in
+`scripts/patch-android-permissions.mjs` (unit-tested in
+`src/core/androidPatch.test.ts`). It adds `CAMERA`,
+`android.webkit.PermissionRequest` and a non-required camera `uses-feature`
+(tablets without a camera still install and can draw manually), then **edits**
+the generated `MainActivity` to approve the WebView request:
 
-Approve the request in the generated `MainActivity` — the committed template is
-`src-tauri/android/MainActivity.kt.tmpl`:
+```kotlin
+// inserted before the class's closing brace, keeping Tauri's onCreate
+override fun onWebViewCreate(webView: WebView) {
+    webView.webChromeClient = object : WebChromeClient() {
+        override fun onPermissionRequest(request: PermissionRequest) {
+            if (!request.resources.contains(PermissionRequest.RESOURCE_VIDEO_CAPTURE)) {
+                request.deny()
+                return
+            }
+            // grant after the runtime CAMERA permission is held; see the script
+        }
+    }
+}
+```
+
+> It edits rather than replaces the file on purpose: the Tauri template's
+> `onCreate` calls `enableEdgeToEdge()`, which a wholesale replacement silently
+> dropped.
+
+### Release signing
+
+`npm run android:signing` writes `src-tauri/gen/android/keystore.properties` and
+adds a `release` signingConfig to the generated `app/build.gradle.kts`. The second
+part is required — with only the properties file, Gradle still produces an
+unsigned release APK. `release.yml` runs it after `android init` when the keystore
+secrets are present.
+
+The original snippet, for reference:
 
 ```kotlin
 package app.lightpen.desktop

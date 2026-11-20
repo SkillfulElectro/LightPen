@@ -158,3 +158,60 @@ describe('Rust toolchain policy', () => {
     expect(config).toContain('incompatible-rust-versions = "fallback"');
   });
 });
+
+describe('release workflow secret handling', () => {
+  const release = () => read('.github/workflows/release.yml');
+
+  it('never pipes into sdkmanager under pipefail', () => {
+    // `yes | sdkmanager ... > /dev/null` reports SIGPIPE from `yes` and fails the
+    // step; setup-android already accepts the licences.
+    // Comments explain the old bug, so only compare executable lines.
+    const code = release()
+      .split('\n')
+      .filter((line) => !line.trim().startsWith('#'))
+      .join('\n');
+    expect(code).not.toMatch(/yes\s*\|\s*sdkmanager/);
+    expect(code).toContain('sdkmanager --install');
+  });
+
+  it('exports both NDK_HOME and ANDROID_NDK_HOME', () => {
+    const text = release();
+    expect(text).toContain('NDK_HOME=$NDK_DIR');
+    expect(text).toContain('ANDROID_NDK_HOME=$NDK_DIR');
+  });
+
+  it('gates every iOS signing variable on the same flag', () => {
+    // A partial credential set is a hard CLI error, so they are all-or-nothing.
+    const text = release();
+    const ios = text.slice(text.indexOf('build-ios'), text.indexOf('build-ios') + 12000);
+    for (const name of [
+      'APPLE_TEAM_ID',
+      'APPLE_API_ISSUER',
+      'APPLE_API_KEY_ID',
+      'APPLE_API_KEY_PATH',
+    ]) {
+      expect(ios, `${name} must be gated on HAS_IOS_SIGNING`).toMatch(
+        new RegExp(`${name}: \\$\\{\\{ env\\.HAS_IOS_SIGNING == 'true'`),
+      );
+    }
+  });
+
+  it('requires the certificate and the API key before enabling signing', () => {
+    const text = release();
+    const flag = /HAS_IOS_SIGNING: \$\{\{(.*?)\}\}\s*$/m.exec(text)?.[1] ?? '';
+    expect(flag).toContain('APPLE_CERTIFICATE');
+    expect(flag).toContain('APPLE_API_KEY');
+  });
+
+  it('passes --no-sign after `--` so npm does not eat it', () => {
+    expect(release()).toContain('npm run tauri -- ios build --no-sign');
+  });
+
+  it('configures Android signing only after android init', () => {
+    const text = release();
+    const init = text.indexOf('tauri android init');
+    const signing = text.indexOf('npm run android:signing');
+    expect(init).toBeGreaterThan(-1);
+    expect(signing).toBeGreaterThan(init);
+  });
+});
