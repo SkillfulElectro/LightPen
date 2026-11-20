@@ -107,7 +107,10 @@ app, not by a system prompt: WebKitGTK denies every permission request
 nobody answers, so `src-tauri/src/lib.rs` answers it with
 `Builder::on_permission_request` (camera only; see ADR-023). That API
 needs Tauri ≥ 2.12 — `src-tauri/Cargo.toml` pins `2.12` as the floor for
-`tauri`/`tauri-build`, and `src/core/tauriConfig.test.ts` fails if the
+the `tauri` crate only (`tauri-build` stays on `"2"`: it versions
+independently at 2.7.x, and a `^2.12` requirement on it is unsatisfiable
+and fails every platform build at dependency resolution), and
+`src/core/tauriConfig.test.ts` fails if the
 handler, its camera-only scope, the floor, or the dependencies above are
 dropped. Builds older than this fix cannot be repaired by any user
 setting: the user must install a fixed build.

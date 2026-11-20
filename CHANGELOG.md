@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **All platform builds failing at Cargo dependency resolution**
+  (`failed to select a version for the requirement tauri-build = "^2.12"`).
+  The Tauri subcrates version independently — `tauri` 2.12.x pairs with
+  `tauri-build` 2.7.x and no stable `tauri-build` 2.12 exists — so the
+  2.12 floor introduced with the camera fix now applies to the `tauri`
+  crate only, and `tauri-build` is back to `"2"`. Guarded in
+  `src/core/tauriConfig.test.ts` against mirroring the minor again.
 - **Camera “permission not granted” on Linux (reported on CachyOS/Arch).**
   WebKitGTK denies every webview permission request the app does not
   answer, and LightPen never answered it, so `getUserMedia` always

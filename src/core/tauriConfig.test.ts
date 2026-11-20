@@ -126,17 +126,33 @@ describe('Linux webview camera permission (src-tauri)', () => {
 
   it('pins Tauri >= 2.12, the first release with on_permission_request', () => {
     const cargo = read('src-tauri/Cargo.toml');
-    for (const crate of ['tauri', 'tauri-build']) {
-      const version = new RegExp(`^${crate}\\s*=\\s*\\{\\s*version\\s*=\\s*"([^"]+)"`, 'm').exec(
-        cargo,
-      )?.[1];
-      expect(version, `${crate} version`).toBeTruthy();
-      const [major = 0, minor = 0] = version!.split('.').map(Number);
-      expect(
-        major * 1000 + minor,
-        `${crate} = "${version}" predates on_permission_request (needs >= 2.12)`,
-      ).toBeGreaterThanOrEqual(2012);
-    }
+    const requirement = (crate: string) =>
+      new RegExp(`^${crate}\\s*=\\s*\\{\\s*version\\s*=\\s*"([^"]+)"`, 'm').exec(cargo)?.[1];
+
+    // Only the `tauri` crate gets the 2.12 floor: that is the crate whose
+    // API grew `on_permission_request`.
+    const tauri = requirement('tauri');
+    expect(tauri, 'tauri version').toBeTruthy();
+    const [tauriMajor = 0, tauriMinor = 0] = tauri!.split('.').map(Number);
+    expect(
+      tauriMajor * 1000 + tauriMinor,
+      `tauri = "${tauri}" predates on_permission_request (needs >= 2.12)`,
+    ).toBeGreaterThanOrEqual(2012);
+
+    // `tauri-build` must NOT get the same floor — that is what broke every
+    // platform build. The Tauri subcrates version independently (tauri
+    // 2.12.x pairs with tauri-build 2.7.x; the `tauri` crate itself depends
+    // on `tauri-build ^2.7.6`), no stable tauri-build 2.12 exists, and
+    // `tauri-build = "^2.12"` fails dependency resolution on all platforms
+    // before anything compiles. Only the shared major is required.
+    const tauriBuild = requirement('tauri-build');
+    expect(tauriBuild, 'tauri-build version').toBeTruthy();
+    const [buildMajor = 0, buildMinor = 0] = tauriBuild!.split('.').map(Number);
+    expect(buildMajor, `tauri-build = "${tauriBuild}" must stay on major 2`).toBe(2);
+    expect(
+      buildMajor * 1000 + buildMinor,
+      `tauri-build = "${tauriBuild}" mirrors the tauri minor, which does not exist on crates.io`,
+    ).toBeLessThan(2012);
   });
 });
 
