@@ -47,6 +47,9 @@ export default function CameraPreview({ pageSize, onGesture }: Props) {
   const [cameras, setCameras] = useState<CameraDevice[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [modelMissing, setModelMissing] = useState(false);
+  // On phones the panel floats over the page so the user can see their hand
+  // and the PDF at the same time; on desktop it stays in the side column.
+  const [collapsed, setCollapsed] = useState(true);
   const active = useStore((s) => s.tracking.active);
   const fps = useStore((s) => s.tracking.fps);
   const hint = useStore((s) => s.tracking.hint);
@@ -312,7 +315,16 @@ export default function CameraPreview({ pageSize, onGesture }: Props) {
   };
 
   return (
-    <div className="camera-panel" aria-label="Camera preview">
+    <div className={`camera-panel ${collapsed ? 'collapsed' : ''}`} aria-label="Camera preview">
+      <button
+        type="button"
+        className="camera-collapse"
+        onClick={() => setCollapsed((c) => !c)}
+        aria-expanded={!collapsed}
+        aria-label={t(collapsed ? 'camera.expand' : 'camera.collapse')}
+      >
+        📷 {t('toolbar.camera')}
+      </button>
       <div className="camera-video-wrap">
         <video
           ref={videoRef}

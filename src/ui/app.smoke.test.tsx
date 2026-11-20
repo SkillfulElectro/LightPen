@@ -143,3 +143,15 @@ describe('corrupt PDF handling', () => {
     expect(alert.textContent).toMatch(/could not be opened|could not be read as a PDF/i);
   });
 });
+
+describe('mobile camera panel', () => {
+  it('is collapsible and reports its expanded state', async () => {
+    const { default: App } = await import('../App');
+    render(<App />);
+    const toggle = await screen.findByRole('button', { name: 'Show camera preview' });
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    expect(screen.getByRole('button', { name: 'Hide camera preview' })).toBeTruthy();
+  });
+});

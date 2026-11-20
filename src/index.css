@@ -258,6 +258,11 @@ label.check {
   gap: 0.5rem;
 }
 
+/* The collapse toggle is only relevant in the floating (mobile) layout. */
+.camera-collapse {
+  display: none;
+}
+
 .camera-video-wrap {
   position: relative;
   width: 100%;
@@ -482,12 +487,47 @@ kbd {
 @media (max-width: 800px) {
   .app-main {
     flex-direction: column;
+    position: relative;
   }
 
+  /* The viewer keeps the whole height; the camera panel floats above it as a
+     picture-in-picture so the PDF and the hand are visible together. */
   .side-panel {
-    width: 100%;
-    border-left: none;
-    border-top: 1px solid var(--border);
+    position: absolute;
+    right: 0.5rem;
+    bottom: 0.5rem;
+    width: min(58vw, 260px);
+    padding: 0.5rem;
+    border: 1px solid var(--border);
+    border-radius: 0.5rem;
+    border-left: 1px solid var(--border);
+    background: color-mix(in srgb, var(--bg) 92%, transparent);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+    max-height: 70vh;
+    z-index: 10;
+  }
+
+  .side-hint,
+  .side-panel .link-button {
+    display: none;
+  }
+
+  .camera-collapse {
+    display: block;
+  }
+
+  .camera-panel.collapsed .camera-video-wrap,
+  .camera-panel.collapsed .camera-controls,
+  .camera-panel.collapsed .camera-error,
+  .camera-panel.collapsed .camera-hint,
+  .camera-panel.collapsed .camera-privacy {
+    display: none;
+  }
+
+  /* Bigger touch targets in the toolbar for fingers, not cursors. */
+  .toolbar button {
+    min-height: 2.5rem;
+    min-width: 2.5rem;
   }
 }
 

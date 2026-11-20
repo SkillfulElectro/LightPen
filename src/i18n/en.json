@@ -52,7 +52,9 @@
     "hintTooClose": "Your hand looks too close — move back a little.",
     "hintLowLight": "Low light detected — try a brighter spot.",
     "hintOutOfFrame": "Hand out of frame — move it into view.",
-    "modelMissing": "Hand-tracking model not found. Run `npm run fetch:model` or reinstall the app."
+    "modelMissing": "Hand-tracking model not found. Run `npm run fetch:model` or reinstall the app.",
+    "expand": "Show camera preview",
+    "collapse": "Hide camera preview"
   },
   "gestures": {
     "penDown": "Pinch thumb + index to write",
