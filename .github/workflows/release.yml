@@ -169,7 +169,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf \
-            libgtk-3-dev libsoup-3.0-dev rpm
+            libgtk-3-dev libsoup-3.0-dev rpm \
+            gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-pipewire gstreamer1.0-libav
 
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
@@ -261,6 +262,46 @@ jobs:
           # A single --target: the matrix already carries it (a universal macOS
           # build is expressed as the universal-apple-darwin pseudo-target).
           args: ${{ matrix.args }} --target ${{ matrix.target }}
+
+      - name: AppImage ships the camera plugins
+        if: matrix.name == 'linux-x64'
+        shell: bash
+        # `bundleMediaFramework` copies every plugin from the *build machine* into
+        # the AppImage, so a runner without the capture plugins produces an app
+        # whose WebKitGTK sees zero cameras ("no device was found amongst 0
+        # devices"). Fail here rather than ship that.
+        run: |
+          set -euo pipefail
+          dir=/usr/lib/x86_64-linux-gnu/gstreamer-1.0
+          appimage=""
+          for candidate in src-tauri/target/${{ matrix.target }}/release/bundle/appimage/*.AppImage; do
+            [[ -f "$candidate" ]] && appimage="$candidate"
+          done
+          if [[ -z "$appimage" ]]; then
+            echo "::error::No AppImage was produced."
+            exit 1
+          fi
+          missing=()
+          for element in libgstvideo4linux2.so libgstpipewire.so; do
+            [[ -f "$dir/$element" ]] || missing+=("$element")
+          done
+          if (( ${#missing[@]} > 0 )); then
+            echo "::error::Capture plugins missing from the build machine, so the AppImage cannot see a camera: ${missing[*]}"
+            exit 1
+          fi
+          # Confirm they really ended up inside the bundle, not just on the runner.
+          # `--appimage-extract` writes `squashfs-root` into the current directory;
+          # running it from the repo root keeps the paths below predictable, and
+          # `./` keeps the image's own self-path resolution working.
+          ./"$appimage" --appimage-extract 'usr/lib/gstreamer-1.0/*' >/dev/null
+          for element in libgstvideo4linux2.so libgstpipewire.so; do
+            if [[ ! -f "squashfs-root/usr/lib/gstreamer-1.0/$element" ]]; then
+              echo "::error::$element was not bundled into the AppImage."
+              exit 1
+            fi
+          done
+          rm -rf squashfs-root
+          echo "AppImage contains the v4l2 and PipeWire capture plugins."
 
       - name: Normalise artifact names
         if: matrix.os != 'windows-latest'

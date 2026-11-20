@@ -18,6 +18,7 @@ import {
   trackingHint,
 } from '../core/coords';
 import { GestureClassifier } from '../core/gesture';
+import { DEFAULT_TOUCH_CONFIG, TouchGestureClassifier } from '../core/touchGestures';
 import { OneEuroPoint } from '../core/oneEuro';
 import type { PageSize, Stroke } from '../core/types';
 import {
@@ -55,6 +56,7 @@ export default function CameraPreview({ pageSize, onGesture }: Props) {
   const hint = useStore((s) => s.tracking.hint);
   const settings = useStore((s) => s.settings);
   const setTracking = useStore((s) => s.setTracking);
+  const tool = useStore((s) => s.tool);
 
   const refreshCameras = useCallback(async () => {
     setCameras(await listCameras());
@@ -100,6 +102,14 @@ export default function CameraPreview({ pageSize, onGesture }: Props) {
         enableErase: settings.enableErase,
         enablePageSwipe: settings.enablePageSwipe,
         enablePauseFist: settings.enablePauseFist,
+      });
+      // Touch mode uses its own classifier; only one of the two runs per frame,
+      // decided by `settings.gestureMode`.
+      const touch = new TouchGestureClassifier({
+        ...DEFAULT_TOUCH_CONFIG,
+        tapThreshold: settings.pinchThreshold,
+        releaseThreshold: settings.pinchReleaseThreshold,
+        zoomSensitivity: settings.zoomSensitivity,
       });
       const smoother = new OneEuroPoint({
         minCutoff: settings.smoothingMinCutoff,
@@ -169,6 +179,57 @@ export default function CameraPreview({ pageSize, onGesture }: Props) {
             return;
           }
           setTracking({ handPresent: true });
+
+          if (settings.gestureMode === 'touch') {
+            const frame = touch.classify(result.landmarks, nowMs);
+            const page = useStore.getState().currentPage;
+            if (frame.twoFingers) {
+              // Two fingers: scroll turns pages, spread zooms. Never draws.
+              finishStroke();
+              if (frame.pageDelta !== 0) {
+                useStore.getState().setCurrentPage(page + frame.pageDelta);
+                onGesture?.(frame.pageDelta > 0 ? 'scroll-next' : 'scroll-prev');
+              }
+              if (frame.zoomFactor !== 1) {
+                useStore.getState().setZoom(useStore.getState().zoom * frame.zoomFactor);
+                onGesture?.('zoom');
+              }
+            } else if (frame.contact) {
+              const where = clampToPage(
+                cameraToPage(frame.point, settings.calibration, pageSize, settings.mirrored),
+                pageSize,
+              );
+              const erasing = tool === 'eraser';
+              if (erasing) {
+                finishStroke();
+                useStore.getState().eraseAt(page, where, 18);
+              } else {
+                if (activeStroke && activeStroke.page !== page) finishStroke();
+                if (!activeStroke) {
+                  activeStroke = createStroke(page, settings.penColor, settings.penWidth, where);
+                  useStore.setState({ activeStroke });
+                } else {
+                  addPoint(activeStroke, where);
+                }
+              }
+              setTracking({
+                hint: trackingHint(frame.pinchDistance) ?? (lowLight ? 'low-light' : null),
+              });
+              useStore.setState({
+                handCursor: { x: where.x, y: where.y, kind: erasing ? 'erase' : 'pen-down' },
+              });
+            } else {
+              finishStroke();
+              useStore.setState({ handCursor: null });
+              if (frame.tap) onGesture?.('tap');
+              if (frame.action === 'pause') {
+                onGesture?.('pause');
+                stop();
+              }
+            }
+            return;
+          }
+
           const g = classifier.classify(result.landmarks, nowMs);
           setTracking({ hint: trackingHint(g.handSize) ?? (lowLight ? 'low-light' : null) });
           onGesture?.(g.kind);

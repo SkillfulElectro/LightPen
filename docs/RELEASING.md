@@ -70,6 +70,32 @@ given a `releaseId`. The `verify` job prints a `::warning::` listing any asset
 that does not match the scheme above, so a duplicate or stale upload is visible
 in the run summary instead of quietly shipping twice.
 
+## The AppImage must bundle GStreamer
+
+WebKitGTK captures video through GStreamer, and the AppImage's `AppRun` points
+GStreamer at the image's own plugin directory — not the host's. With Tauri's
+default `bundle.linux.appimage.bundleMediaFramework: false` that directory is
+never created, so the bundled WebKit finds **zero cameras** and `getUserMedia`
+fails with "no device was found amongst 0 devices", even on a machine where the
+camera works in every other app. Tauri only passes `--plugin gstreamer` to
+linuxdeploy when that option is true (`linuxdeploy.rs`), and only that plugin
+populates the directory.
+
+Two consequences, both enforced by CI:
+
+- `src-tauri/tauri.conf.json` sets `bundleMediaFramework: true`
+  (`src/core/tauriConfig.test.ts` fails if it is ever turned back off).
+- The linuxdeploy plugin copies **every** plugin from the _build machine_, so
+  the build job must install the capture plugins or the image ships an empty
+  directory anyway: `gstreamer1.0-plugins-base gstreamer1.0-plugins-good
+gstreamer1.0-pipewire gstreamer1.0-libav`. The release workflow then checks,
+  after the build, that `libgstvideo4linux2.so` and `libgstpipewire.so` are both
+  on the runner _and_ inside the produced AppImage.
+
+`.deb` and `.rpm` are not affected: they use the system plugins. Users still on
+an older AppImage can work around it with
+`GST_PLUGIN_PATH=/usr/lib/gstreamer-1.0:/usr/lib64/gstreamer-1.0 ./LightPen_*.AppImage`.
+
 ## Secrets
 
 All signing is **optional and secret-driven**. If a secret is missing the build

@@ -11,9 +11,17 @@ import { useStore } from '../store/useStore';
 import { DistanceIllustration, PlacementIllustration } from './illustrations';
 import { startTracking } from './trackingHandle';
 
-type Exercise = 'hover' | 'write' | 'erase' | 'swipe' | 'pause';
-const EXERCISES: Exercise[] = ['hover', 'write', 'erase', 'swipe', 'pause'];
-const TOTAL_STEPS = 4 + EXERCISES.length + 1; // intro(4) + practice(5) + done(1) = 10
+type Exercise =
+  'hover' | 'write' | 'erase' | 'swipe' | 'pause' | 'tap' | 'scroll' | 'zoom' | 'longPress';
+
+/** Air mode's grammar, taught as-is. */
+const EXERCISES_AIR: Exercise[] = ['hover', 'write', 'erase', 'swipe', 'pause'];
+/**
+ * Touch mode's grammar. It covers the same ground (write, erase, pages, pause)
+ * plus the two verb a phone has that air mode does not — tap and pinch-zoom.
+ */
+const EXERCISES_TOUCH: Exercise[] = ['write', 'tap', 'scroll', 'zoom', 'longPress'];
+const INTRO_STEPS = 4;
 
 export default function Tutorial() {
   const { t } = useTranslation();
@@ -32,6 +40,9 @@ export default function Tutorial() {
   const [sandboxMode, setSandboxMode] = useState<'pen' | 'eraser'>('pen');
   const [sandboxMsg, setSandboxMsg] = useState('');
   const lastGesture = useStore((s) => s.lastGesture);
+  const gestureMode = useStore((s) => s.settings.gestureMode);
+  const exercises = gestureMode === 'touch' ? EXERCISES_TOUCH : EXERCISES_AIR;
+  const totalSteps = INTRO_STEPS + exercises.length + 1;
 
   useEffect(() => {
     if (open) {
@@ -55,22 +66,30 @@ export default function Tutorial() {
   // Live feedback from real air gestures: the sandbox step completes when the
   // tracker reports the gesture the user is being taught.
   useEffect(() => {
-    if (!open || step < 4 || step >= 4 + EXERCISES.length) return;
-    const current = EXERCISES[step - 4];
+    if (!open || step < INTRO_STEPS || step >= INTRO_STEPS + exercises.length) return;
+    const current = exercises[step - INTRO_STEPS];
     if (!current) return;
     const kind = lastGesture.kind;
     const matched =
-      (current === 'write' && kind === 'pen-down') ||
+      (current === 'write' && (kind === 'pen-down' || kind === 'tap')) ||
       (current === 'hover' && kind === 'hover') ||
       (current === 'erase' && kind === 'erase') ||
       (current === 'swipe' && kind.startsWith('swipe-')) ||
-      (current === 'pause' && kind === 'pause');
+      (current === 'pause' && kind === 'pause') ||
+      // Touch mode reports its own vocabulary.
+      (current === 'tap' && kind === 'tap') ||
+      (current === 'scroll' && kind.startsWith('scroll-')) ||
+      (current === 'zoom' && kind === 'zoom') ||
+      (current === 'longPress' && kind === 'pause');
     if (matched) markDone(current);
-  }, [lastGesture.seq, lastGesture.kind, open, step, markDone]);
+  }, [lastGesture.seq, lastGesture.kind, open, step, exercises, markDone]);
 
   if (!open) return null;
 
-  const exercise = step >= 4 && step < 4 + EXERCISES.length ? EXERCISES[step - 4] : null;
+  const exercise =
+    step >= INTRO_STEPS && step < INTRO_STEPS + exercises.length
+      ? exercises[step - INTRO_STEPS]
+      : null;
   const isPractice = exercise !== null;
 
   const drawSandbox = () => {
@@ -153,7 +172,7 @@ export default function Tutorial() {
   };
 
   const next = () => {
-    if (step >= TOTAL_STEPS - 1) setOpen(false);
+    if (step >= totalSteps - 1) setOpen(false);
     else setStep(step + 1);
   };
 
@@ -172,7 +191,7 @@ export default function Tutorial() {
           </button>
         </div>
         <p className="step-label">
-          {t('tutorial.stepOf', { current: step + 1, total: TOTAL_STEPS })}
+          {t('tutorial.stepOf', { current: step + 1, total: totalSteps })}
         </p>
         <div className="modal-body">
           {step === 0 && (
@@ -190,7 +209,7 @@ export default function Tutorial() {
                 className="btn-primary"
                 onClick={() => {
                   void startTracking();
-                  setStep(Math.min(2, TOTAL_STEPS - 1));
+                  setStep(Math.min(2, totalSteps - 1));
                 }}
               >
                 {t('camera.allow')}
@@ -254,20 +273,39 @@ export default function Tutorial() {
                 aria-label="Practice area"
               />
               <p className="sandbox-hint">
-                {t('gestures.penDown')} · {t('gestures.erase')} · {t('gestures.swipe')} ·{' '}
-                {t('gestures.pause')}
+                {gestureMode === 'touch' ? (
+                  <>{t('tutorial.practiceTouchHint')}</>
+                ) : (
+                  <>
+                    {t('gestures.penDown')} · {t('gestures.erase')} · {t('gestures.swipe')} ·{' '}
+                    {t('gestures.pause')}
+                  </>
+                )}
               </p>
             </>
           )}
-          {step === TOTAL_STEPS - 1 && (
+          {step === totalSteps - 1 && (
             <>
-              <p>{t('tutorial.done')}</p>
+              <p>{gestureMode === 'touch' ? t('tutorial.doneTouch') : t('tutorial.done')}</p>
               <ul className="cheat-list">
-                <li>✌️ {t('gestures.penDown')}</li>
-                <li>👉 {t('gestures.hover')}</li>
-                <li>🖐️ {t('gestures.erase')}</li>
-                <li>👋 {t('gestures.swipe')}</li>
-                <li>✊ {t('gestures.pause')}</li>
+                {gestureMode === 'touch' ? (
+                  <>
+                    <li>☝️ {t('gestures.touchPoint')}</li>
+                    <li>🤏 {t('gestures.touchDrag')}</li>
+                    <li>⚡ {t('gestures.touchTap')}</li>
+                    <li>✌️ {t('gestures.touchScroll')}</li>
+                    <li>🤏 {t('gestures.touchZoom')}</li>
+                    <li>✊ {t('gestures.touchLongPress')}</li>
+                  </>
+                ) : (
+                  <>
+                    <li>✌️ {t('gestures.penDown')}</li>
+                    <li>👉 {t('gestures.hover')}</li>
+                    <li>🖐️ {t('gestures.erase')}</li>
+                    <li>👋 {t('gestures.swipe')}</li>
+                    <li>✊ {t('gestures.pause')}</li>
+                  </>
+                )}
               </ul>
             </>
           )}
@@ -291,7 +329,7 @@ export default function Tutorial() {
               next();
             }}
           >
-            {step === TOTAL_STEPS - 1 ? t('tutorial.finish') : t('tutorial.next')}
+            {step === totalSteps - 1 ? t('tutorial.finish') : t('tutorial.next')}
           </button>
         </div>
       </div>

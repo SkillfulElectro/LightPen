@@ -54,7 +54,8 @@
     "hintOutOfFrame": "Hand out of frame — move it into view.",
     "modelMissing": "Hand-tracking model not found. Run `npm run fetch:model` or reinstall the app.",
     "expand": "Show camera preview",
-    "collapse": "Hide camera preview"
+    "collapse": "Hide camera preview",
+    "noCapturePlugins": "The camera could not be opened because the video stack is missing from this build. On Linux, use the .deb or .rpm package instead of the AppImage, or install gstreamer1.0-plugins-good and gstreamer1.0-pipewire."
   },
   "gestures": {
     "penDown": "Pinch thumb + index to write",
@@ -62,7 +63,15 @@
     "erase": "Open palm to erase",
     "swipe": "Swipe sideways with open palm for next/previous page",
     "pause": "Hold a fist for 1 second to pause tracking",
-    "pauseArt": "A closed fist, an arrow to a clock, and a pause symbol: holding a fist for one second pauses tracking."
+    "pauseArt": "A closed fist, an arrow to a clock, and a pause symbol: holding a fist for one second pauses tracking.",
+    "modeAir": "Air mode: pinch to write, open palm to erase, swipe to change pages.",
+    "modeTouch": "Touch mode: your index finger is the pointer, just like a phone.",
+    "touchPoint": "Point with your index finger to move the cursor",
+    "touchDrag": "Pinch and move to draw (or to erase, with the eraser tool)",
+    "touchTap": "Quick pinch and release to tap without leaving ink",
+    "touchScroll": "Two fingers up, then move them up or down to change pages",
+    "touchZoom": "Two fingers up, then spread or close them to zoom",
+    "touchLongPress": "Hold a still pinch for 1 second to pause tracking"
   },
   "tutorial": {
     "title": "Welcome to LightPen",
@@ -90,7 +99,13 @@
     "exSwipe": "Swipe sideways with an open palm.",
     "exPause": "Hold a fist for one second.",
     "done": "Great! You know all the gestures. Here is your cheat sheet.",
-    "success": "Nice! Step complete."
+    "success": "Nice! Step complete.",
+    "exTap": "Quickly pinch and release — a tap, with no line left behind.",
+    "exScroll": "Raise two fingers and move them up or down to change page.",
+    "exZoom": "Raise two fingers, then spread or close them.",
+    "exLongPress": "Hold a still pinch for one second.",
+    "doneTouch": "Great! That is the phone vocabulary, with your hand as the finger. Here is your cheat sheet.",
+    "practiceTouchHint": "Practice with the mouse here: click and drag to draw, and the pinch, two-finger and long-press steps complete as you go."
   },
   "settings": {
     "title": "Settings",
@@ -101,7 +116,7 @@
     "left": "Left",
     "right": "Right",
     "camera": "Camera",
-    "mirrored": "Mirror preview",
+    "mirrored": "Preview mirroring",
     "theme": "Theme",
     "system": "System",
     "light": "Light",
@@ -115,14 +130,19 @@
     "smoothingBeta": "Smoothing speed response",
     "penWidth": "Default pen width",
     "penColor": "Default pen colour",
-    "mirrored": "Preview mirroring",
     "mirrorOn": "Mirrored (selfie view)",
     "mirrorOff": "Not mirrored",
     "calibration": "Writing area calibration",
     "calibrationSet": "Current area: x {{x0}}–{{x1}}%, y {{y0}}–{{y1}}% of the camera frame.",
     "calibrationUnset": "Not calibrated yet — the whole camera frame maps to the page.",
     "calibrate": "Re-run calibration",
-    "clearCalibration": "Use the whole frame"
+    "clearCalibration": "Use the whole frame",
+    "gestureMode": "Gesture style",
+    "modeAir": "Air (pinch, palm, swipe)",
+    "modeTouch": "Touch (like a phone)",
+    "modeAirHelp": "Air gestures: pinch thumb and index to write, show an open palm to erase, swipe sideways with an open palm to change pages, hold a fist to pause. No tool switching needed.",
+    "modeTouchHelp": "Touch gestures, the way a phone works: your index finger is the cursor, pinch-and-drag draws, a quick pinch is a tap, two fingers scroll and zoom, and a still pinch pauses. Erasing uses the toolbar's eraser, like a phone app.",
+    "zoomSensitivity": "Two-finger zoom sensitivity"
   },
   "shortcuts": {
     "title": "Keyboard shortcuts",

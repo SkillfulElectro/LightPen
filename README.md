@@ -28,6 +28,11 @@
 
 ## Gesture guide
 
+LightPen ships two gesture vocabularies. Pick one in **Settings → Gesture style**;
+the cheat sheet (toolbar **?**) always shows the one in use.
+
+**Air** — the original scheme, nothing to switch between:
+
 | Gesture                       | Action                                            |
 | ----------------------------- | ------------------------------------------------- |
 | 📌 Pinch thumb + index        | Pen down — draw. Ink follows the index fingertip. |
@@ -35,6 +40,24 @@
 | 🖐️ Open palm (or two fingers) | Erase strokes under the palm centre.              |
 | 👋 Open-palm horizontal swipe | Next / previous page (1.5 s cooldown).            |
 | ✊ Fist held ~1 s             | Pause tracking (camera stops).                    |
+
+**Touch** — for anyone who would rather not learn a new vocabulary. It is the
+phone mapping, with the lift standing in for contact: a camera cannot feel a
+fingertip, so it reads an extended index finger (with the pinch closed) as
+"touching" and a curled one as "lifted".
+
+| Gesture                    | Action                                            |
+| -------------------------- | ------------------------------------------------- |
+| ☝️ Index extended, pinched | Finger down — the cursor follows the fingertip.   |
+| 🤏 Pinch and move          | Drag — draw. With the eraser tool, erase instead. |
+| ⚡ Quick pinch and release | Tap — releases without leaving a dot behind.      |
+| ✌️ Two fingers up, move    | Scroll — next / previous page.                    |
+| 🤏 Two fingers spread      | Pinch-zoom the page.                              |
+| ✊ Still pinch held ~1 s   | Long press — pause tracking.                      |
+
+Erasing is a _tool_ in touch mode, like it is in a phone app: pick the eraser,
+then touch and drag. That keeps the outcome of a tap under your control instead
+of guessing it from a hand pose.
 
 ## Privacy
 

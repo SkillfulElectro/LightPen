@@ -51,7 +51,18 @@ export interface CalibrationRect {
 export type Handedness = 'Left' | 'Right';
 
 /** Gestures the classifier can emit. */
-export type GestureKind = 'pen-down' | 'hover' | 'erase' | 'fist' | 'none';
+export type GestureKind = 'pen-down' | 'hover' | 'erase' | 'fist' | 'two-finger' | 'none';
+
+/**
+ * How the hand maps onto the page.
+ *
+ * - `air` — the original LightPen scheme: pinch to draw, open palm to erase,
+ *   palm swipe for pages, fist hold to pause.
+ * - `touch` — the same gestures a phone uses, one hand: index finger *is* the
+ *   fingertip pointer, pinch (thumb+index) is a tap, a closed pinch that moves
+ *   is a drag, two fingers is scroll / pinch-zoom.
+ */
+export type GestureMode = 'air' | 'touch';
 
 export type DominantHand = 'left' | 'right' | 'auto';
 export type Theme = 'light' | 'dark' | 'system';
@@ -74,6 +85,9 @@ export interface Settings {
   enablePageSwipe: boolean;
   enablePauseFist: boolean;
   enableErase: boolean;
+  gestureMode: GestureMode;
+  /** Two-finger distance change that zooms (touch mode). */
+  zoomSensitivity: number;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -93,6 +107,8 @@ export const DEFAULT_SETTINGS: Settings = {
   enablePageSwipe: true,
   enablePauseFist: true,
   enableErase: true,
+  gestureMode: 'air',
+  zoomSensitivity: 1,
 };
 
 /** Serialized sidecar format (`<name>.lightpen.json`). */

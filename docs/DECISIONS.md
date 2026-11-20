@@ -264,3 +264,37 @@ hand-written lockfile would be worse than none. `src/core/tauriConfig.test.ts`
 fails if the toolchain pin is ever older than the declared MSRV, if the MSRV is
 below 1.85, or if the resolver setting is dropped. Tracked as an open issue in
 `docs/FINAL-REPORT.md`.
+
+## ADR-022 — Touch mode is a second vocabulary, not a tweak to the first
+
+**Context.** Air mode's grammar is "pose picks the tool": pinch writes, open palm
+erases, palm swipe turns pages, fist pauses. It works, but it has to be learned,
+and the user who asked for this said plainly: _"I want its gestures and how they
+work be like how I would use touch in my smartphone."_ A phone does not have a
+trick for erasing — the eraser is a tool you pick, and then you drag.
+
+**Decision.** `settings.gestureMode` selects between two classifiers, both fed
+the same landmarks: the existing `GestureClassifier` (`air`, unchanged and still
+the default) and `TouchGestureClassifier` (`touch`). Touch mode maps one hand
+onto the phone grammar — pinched index = finger down, move = drag, quick
+close-and-release = tap, two fingers = scroll and pinch-zoom, still hold = long
+press. Air mode's switches disappear from Settings while touch mode is active,
+but their stored values are kept.
+
+**Why "lifted" is a pose.** A camera cannot observe contact, only shape. The
+honest equivalent of lifting a finger is curling the index back towards the
+palm: without it, moving your hand between strokes would draw a connecting line
+across the page. This is the one place the metaphor has to be explained rather
+than assumed, hence the explicit cheat-sheet line.
+
+**Why erasing stays a tool.** Making "open palm over a stroke" erase in touch
+mode would mean a tap could mean _draw_ or _delete_ depending on a pose the user
+is not thinking about. Tools are visible and reversible; that matters more than
+saving one click.
+
+**Consequences.** Gesture behaviour is now per-mode testable
+(`src/core/touchGestures.test.ts` pins the vocabulary itself: a lifted finger
+never inks, a tap never leaves a dot, two fingers never draw). The two-finger
+pose that air mode uses for erasing is taken by scrolling in touch mode — which
+is why the mode is a choice and air mode is still the default: switching the
+default would silently change the meaning of a gesture for existing users.
