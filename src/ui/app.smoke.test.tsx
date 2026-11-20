@@ -129,3 +129,17 @@ describe('calibration step', () => {
     expect(await screen.findByText('Step 5 of 10')).toBeTruthy();
   });
 });
+
+describe('corrupt PDF handling', () => {
+  it('shows the friendly error, not a crash', async () => {
+    const { default: App } = await import('../App');
+    render(<App />);
+    window.dispatchEvent(
+      new CustomEvent('lightpen:file', {
+        detail: { name: 'broken.pdf', bytes: new Uint8Array([1, 2, 3, 4, 5]) },
+      }),
+    );
+    const alert = await screen.findByRole('alert', undefined, { timeout: 5000 });
+    expect(alert.textContent).toMatch(/could not be opened|could not be read as a PDF/i);
+  });
+});

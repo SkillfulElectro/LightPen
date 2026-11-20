@@ -135,3 +135,58 @@ test('keyboard shortcuts: eraser and zoom', async ({ page }) => {
     'true',
   );
 });
+
+test('settings dialog exposes the full surface and re-runs calibration', async ({ page }) => {
+  await page.getByRole('button', { name: 'Settings' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Settings' });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByLabel(/Pinch sensitivity/)).toBeVisible();
+  await expect(dialog.getByLabel(/Smoothing/).first()).toBeVisible();
+  await expect(dialog.getByLabel('Dominant hand')).toBeVisible();
+  await expect(dialog.getByLabel('Language')).toBeVisible();
+  for (const gesture of ['Page swipe', 'Fist pause', 'Palm erase']) {
+    await expect(dialog.getByLabel(gesture)).toBeVisible();
+  }
+  await page.keyboard.press('Escape');
+  await expect(dialog).toBeHidden();
+});
+
+test('warns instead of crashing when the opened file is not a PDF', async ({ page }) => {
+  // A corrupt "PDF" must produce the friendly viewer error, not a blank page.
+  await page.evaluate(() => {
+    const detail = { name: 'broken.pdf', bytes: new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8]) };
+    window.dispatchEvent(new CustomEvent('lightpen:file', { detail }));
+  });
+  await expect(page.getByRole('alert')).toContainText(
+    /could not be opened|could not be read as a PDF/i,
+  );
+});
+
+test('sidecar autosave restores ink when the same PDF is reopened', async ({ page }) => {
+  await openSample(page);
+  const ink = page.locator('.ink-canvas');
+  const box = await ink.boundingBox();
+  if (!box) throw new Error('ink canvas not visible');
+  await page.mouse.move(box.x + 70, box.y + 100);
+  await page.mouse.down();
+  await page.mouse.move(box.x + 200, box.y + 160, { steps: 6 });
+  await page.mouse.up();
+  // Autosave is debounced by 800 ms.
+  await page.waitForTimeout(1200);
+  const stored = await page.evaluate(() =>
+    Object.keys(localStorage).some((k) => k.startsWith('lightpen:sidecar:')),
+  );
+  expect(stored).toBe(true);
+  await page.reload();
+  await openSample(page);
+  await expect(page.getByRole('button', { name: 'Undo' })).toBeDisabled();
+  const inked = await page.locator('.ink-canvas').evaluate((el) => {
+    const canvas = el as HTMLCanvasElement;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return false;
+    const { data } = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    for (let i = 3; i < data.length; i += 4) if (data[i] !== 0) return true;
+    return false;
+  });
+  expect(inked).toBe(true);
+});

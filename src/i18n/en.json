@@ -31,7 +31,8 @@
     "pageOf": "Page {{current}} of {{total}}",
     "encrypted": "This PDF is password-protected and cannot be opened.",
     "corrupt": "This file could not be read as a PDF. It may be corrupt.",
-    "tooLarge": "This PDF is too large to open (max 200 MB)."
+    "tooLarge": "This PDF is too large to open (max 200 MB).",
+    "unknown": "This PDF could not be opened. It may be damaged or unsupported."
   },
   "camera": {
     "privacy": "All video processing happens on this device. No frames ever leave your device.",
