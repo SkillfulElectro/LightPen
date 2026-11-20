@@ -115,6 +115,25 @@ docs/            architecture, releasing, decisions, third-party notices
 
 See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the diagram and data flow.
 
+| Doc                                                | What is in it                                            |
+| -------------------------------------------------- | -------------------------------------------------------- |
+| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)     | layers, data flow, coordinate spaces, rendering pipeline |
+| [`docs/DECISIONS.md`](docs/DECISIONS.md)           | ADRs behind every non-obvious choice                     |
+| [`docs/RELEASING.md`](docs/RELEASING.md)           | release workflow, secret names, what is **unverified**   |
+| [`docs/PERFORMANCE.md`](docs/PERFORMANCE.md)       | targets, techniques, how to measure on your hardware     |
+| [`docs/TUTORIAL.md`](docs/TUTORIAL.md)             | non-technical user guide                                 |
+| [`docs/QA-CHECKLIST.md`](docs/QA-CHECKLIST.md)     | manual device/build checklist                            |
+| [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) | dependency and model licences                            |
+
+## Status
+
+`0.1.0` — every feature in the brief is implemented and the automated gates
+(types, lint, format, 62 unit tests, ≥ 80 % core coverage, actionlint on both
+workflows, web production build) pass locally. Things that could not be executed
+in the development environment — Rust compilation, `tauri dev`, Playwright e2e,
+real-webcam tracking, Android/iOS builds and a live run of `release.yml` — are
+listed explicitly under **Unverified** in [`docs/RELEASING.md`](docs/RELEASING.md).
+
 ## License
 
 MIT — see [LICENSE](LICENSE). Third-party licences, including the MediaPipe model terms, are listed in [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
