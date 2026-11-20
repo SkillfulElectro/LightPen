@@ -19,6 +19,7 @@ export default function App() {
   const setPdf = useStore((s) => s.setPdf);
   const setTutorialOpen = useStore((s) => s.setTutorialOpen);
   const setCheatSheetOpen = useStore((s) => s.setCheatSheetOpen);
+  const noteGesture = useStore((s) => s.noteGesture);
   const currentPage = useStore((s) => s.currentPage);
 
   // First-run tutorial.
@@ -231,7 +232,7 @@ export default function App() {
           <PdfViewer pdfBytes={pdfBytes} pdfName={pdfName} onPdfLoaded={onPdfLoaded} />
         </section>
         <aside className="side-panel">
-          <CameraPreview pageSize={pageSize} />
+          <CameraPreview pageSize={pageSize} onGesture={noteGesture} />
           <p className="side-hint">{t('app.tagline')}</p>
           <button type="button" className="link-button" onClick={() => setCheatSheetOpen(true)}>
             ✋ {t('toolbar.cheatSheet')}

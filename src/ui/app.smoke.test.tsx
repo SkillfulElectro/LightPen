@@ -44,3 +44,28 @@ describe('App shell', () => {
     expect(await screen.findByLabelText('Practice area')).toBeTruthy();
   });
 });
+
+describe('tutorial reacts to live gestures', () => {
+  it('completes the write exercise when the tracker reports pen-down', async () => {
+    const { useStore } = await import('../store/useStore');
+    const { default: App } = await import('../App');
+    render(<App />);
+    useStore.setState({ tutorialOpen: true });
+    const next = () => fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+    await screen.findByRole('dialog', { name: 'Welcome to LightPen' });
+    next(); // permission
+    next(); // placement
+    next(); // calibration
+    next(); // practice: hover
+    await screen.findByLabelText('Practice area');
+    useStore.getState().noteGesture('hover');
+    // The success badge renders inside the practice step.
+    await waitFor(() => expect(screen.getByText(/Nice! Step complete/)).toBeTruthy());
+    next(); // practice: write
+    await waitFor(() =>
+      expect(document.querySelector('.step-label')?.textContent).toBe('Step 6 of 10'),
+    );
+    useStore.getState().noteGesture('pen-down');
+    await waitFor(() => expect(screen.getByText(/Nice! Step complete/)).toBeTruthy());
+  });
+});

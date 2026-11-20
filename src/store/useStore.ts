@@ -60,6 +60,9 @@ interface AppState {
 
   tracking: TrackingState;
   setTracking: (patch: Partial<TrackingState>) => void;
+  /** Last gesture emitted by the tracker; `seq` lets the tutorial react to repeats. */
+  lastGesture: { kind: string; seq: number };
+  noteGesture: (kind: string) => void;
 
   tutorialOpen: boolean;
   setTutorialOpen: (open: boolean) => void;
@@ -188,6 +191,8 @@ export const useStore = create<AppState>((set, get) => ({
 
   tracking: { active: false, fps: 0, handPresent: false, hint: null },
   setTracking: (patch) => set({ tracking: { ...get().tracking, ...patch } }),
+  lastGesture: { kind: 'none', seq: 0 },
+  noteGesture: (kind) => set({ lastGesture: { kind, seq: get().lastGesture.seq + 1 } }),
 
   tutorialOpen: false,
   setTutorialOpen: (open) => {

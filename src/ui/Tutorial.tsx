@@ -5,7 +5,7 @@
  * The sandbox works with mouse/touch AND with live air gestures.
  */
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useStore } from '../store/useStore';
 import { startTracking } from './trackingHandle';
@@ -29,6 +29,7 @@ export default function Tutorial() {
   const stillSinceRef = useRef<number | null>(null);
   const [sandboxMode, setSandboxMode] = useState<'pen' | 'eraser'>('pen');
   const [sandboxMsg, setSandboxMsg] = useState('');
+  const lastGesture = useStore((s) => s.lastGesture);
 
   useEffect(() => {
     if (open) {
@@ -37,19 +38,38 @@ export default function Tutorial() {
     }
   }, [open]);
 
+  const markDone = useCallback(
+    (ex: Exercise) => {
+      setDone((prev) => {
+        if (prev.has(ex)) return prev;
+        const next = new Set(prev);
+        next.add(ex);
+        return next;
+      });
+      setSandboxMsg(t('tutorial.success'));
+    },
+    [t],
+  );
+  // Live feedback from real air gestures: the sandbox step completes when the
+  // tracker reports the gesture the user is being taught.
+  useEffect(() => {
+    if (!open || step < 4 || step >= 4 + EXERCISES.length) return;
+    const current = EXERCISES[step - 4];
+    if (!current) return;
+    const kind = lastGesture.kind;
+    const matched =
+      (current === 'write' && kind === 'pen-down') ||
+      (current === 'hover' && kind === 'hover') ||
+      (current === 'erase' && kind === 'erase') ||
+      (current === 'swipe' && kind.startsWith('swipe-')) ||
+      (current === 'pause' && kind === 'pause');
+    if (matched) markDone(current);
+  }, [lastGesture.seq, lastGesture.kind, open, step, markDone]);
+
   if (!open) return null;
 
   const exercise = step >= 4 && step < 4 + EXERCISES.length ? EXERCISES[step - 4] : null;
   const isPractice = exercise !== null;
-
-  const markDone = (ex: Exercise) => {
-    setDone((prev) => {
-      const next = new Set(prev);
-      next.add(ex);
-      return next;
-    });
-    setSandboxMsg(t('tutorial.success'));
-  };
 
   const drawSandbox = () => {
     const canvas = sandboxRef.current;
