@@ -11,7 +11,7 @@ npm install               # runs postinstall: copies MediaPipe WASM into public/
 npm run fetch:model       # downloads the hand-tracking model (not in git)
 npm run make:sample       # regenerates public/sample.pdf
 npm run dev               # http://127.0.0.1:1420
-npm run tauri dev         # full desktop app (needs Rust 1.82+, see rust-toolchain.toml)
+npm run tauri dev         # full desktop app (needs Rust 1.90+, see rust-toolchain.toml)
 ```
 
 The model is intentionally not committed. Without it the app still runs; the

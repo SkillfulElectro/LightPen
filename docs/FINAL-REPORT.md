@@ -12,7 +12,7 @@ development environment.
 | Formatting              | `npx prettier --check .`                                     | ✅ clean                                                                          |
 | Lint (zero warnings)    | `npx eslint . --max-warnings 0`                              | ✅ clean                                                                          |
 | TypeScript strict       | `npx tsc --noEmit`                                           | ✅ clean                                                                          |
-| Unit tests              | `npx vitest run`                                             | ✅ 151 tests in 19 files                                                          |
+| Unit tests              | `npx vitest run`                                             | ✅ 154 tests in 19 files                                                          |
 | Core coverage           | `npx vitest run --coverage`                                  | ✅ 99.2 % statements, 95.5 % branches, 96.8 % functions (threshold 80 %)          |
 | Web production build    | `npm run build`                                              | ✅ pdf.js/MediaPipe split into their own chunks                                   |
 | Workflow syntax         | `actionlint` (WASM) on `ci.yml` + `release.yml`              | ✅ both OK                                                                        |
@@ -78,3 +78,11 @@ Three real defects were found and fixed by these checks rather than by reading c
    on low-end Android devices and adjust `adaptiveSkip` if needed.
 6. **Updater**: not configured (`createUpdaterArtifacts: false`); the signing
    secrets are already wired for when it is enabled.
+7. **Commit `src-tauri/Cargo.lock`.** Without it every clean build re-resolves
+   the dependency graph, so a fresh transitive crate can break a release that
+   previously built (that is exactly how the `cssparser-macros 0.7.1` /
+   `edition2024` failure happened). `.cargo/config.toml` now mitigates it with
+   `incompatible-rust-versions = "fallback"` (ADR-021), but a lockfile is the
+   real fix. Generate it on a networked machine with
+   `cargo generate-lockfile --manifest-path src-tauri/Cargo.toml`, commit it, and
+   change CI's dependency job and `release.yml` to build with `--locked`.

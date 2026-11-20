@@ -46,7 +46,7 @@ env:
   # Must match `channel` in rust-toolchain.toml; src/core/ciEnv.test.ts enforces
   # it. dtolnay/rust-toolchain has no default for this input, so a pinned action
   # reference must pass it explicitly.
-  RUST_TOOLCHAIN: '1.82.0'
+  RUST_TOOLCHAIN: '1.90.0'
 
 jobs:
   # ---------------------------------------------------------------- prepare --

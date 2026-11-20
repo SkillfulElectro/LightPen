@@ -123,3 +123,38 @@ describe('tauri-action inputs', () => {
     for (const args of argsRows) expect(args).not.toContain('--target');
   });
 });
+
+describe('Rust toolchain policy', () => {
+  const readToolchain = () =>
+    /channel\s*=\s*"([^"]+)"/.exec(read('rust-toolchain.toml'))?.[1] ?? '';
+  const readMsrv = () =>
+    /rust-version\s*=\s*"([^"]+)"/.exec(read('src-tauri/Cargo.toml'))?.[1] ?? '';
+  const major = (v: string) => Number(v.split('.')[0]);
+  const minor = (v: string) => Number(v.split('.')[1] ?? 0);
+
+  it('pins a toolchain at least as new as the crate MSRV', () => {
+    const toolchain = readToolchain();
+    const msrv = readMsrv();
+    expect(toolchain).toMatch(/^\d+\.\d+\.\d+$/);
+    expect(msrv).toMatch(/^\d+\.\d+$/);
+    // A release run failed because dependencies needed edition 2024 while the
+    // pinned toolchain was 1.82: the pin must never lag the declared MSRV.
+    expect(
+      major(toolchain) * 1000 + minor(toolchain),
+      `rust-toolchain.toml (${toolchain}) is older than Cargo.toml rust-version (${msrv})`,
+    ).toBeGreaterThanOrEqual(major(msrv) * 1000 + minor(msrv));
+  });
+
+  it('declares an MSRV that can parse edition 2024 dependencies', () => {
+    // Not cosmetic: with an older MSRV, a fresh resolution can pick a crate
+    // whose manifest uses edition2024 and cargo refuses before compiling.
+    const msrv = readMsrv();
+    expect(major(msrv) * 1000 + minor(msrv)).toBeGreaterThanOrEqual(1085);
+  });
+
+  it('enables rust-version-aware dependency resolution', () => {
+    const config = read('.cargo/config.toml');
+    expect(config).toContain('[resolver]');
+    expect(config).toContain('incompatible-rust-versions = "fallback"');
+  });
+});

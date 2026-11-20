@@ -1,0 +1,11 @@
+# Cargo reads config from the current directory upwards, so this file applies to
+# every command in this repo (CI runs from the root; the Tauri CLI runs cargo
+# inside src-tauri/, which also sits below this file).
+#
+# Why it exists: `src-tauri/Cargo.lock` is not committed, so dependencies are
+# re-resolved to the newest published versions on every clean build. A release
+# run died because resolution picked cssparser-macros 0.7.1, which needs
+# edition2024 — unparseable for the pinned toolchain. With `fallback` the
+# resolver prefers versions whose `rust-version` is compatible with ours.
+[resolver]
+incompatible-rust-versions = "fallback"

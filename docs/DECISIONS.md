@@ -235,3 +235,32 @@ browsable; the key alone would be opaque. Annotations from builds before this
 change are not migrated, because a name-keyed sidecar cannot be attributed to one
 of several same-named documents — the safe default is to start that document
 clean rather than attach someone else's strokes.
+
+## ADR-021 — Rust toolchain floor tracks Tauri's MSRV; resolver uses `fallback`
+
+**Decision.** `rust-toolchain.toml` pins Rust **1.90.0**, `src-tauri/Cargo.toml`
+declares `rust-version = "1.90"`, both workflows read the same value from one
+`RUST_TOOLCHAIN` env var, and `.cargo/config.toml` sets
+`resolver.incompatible-rust-versions = "fallback"`.
+
+**Why.** The pin was 1.82.0 (August 2024). Two things followed from that:
+
+- `tauri` / `tauri-build` are unversioned (`"2"`, `"2"`), so a clean build takes
+  the newest 2.x — currently 2.12.x, whose own MSRV is **1.90**. Even with a
+  perfect dependency resolution, 1.82 could never compile it.
+- `src-tauri/Cargo.lock` is not committed, so every clean build re-resolves the
+  whole graph to current releases. A release run picked `cssparser-macros 0.7.1`,
+  whose manifest uses `edition2024`; cargo 1.82 cannot even _parse_ it and fails
+  before compiling anything.
+
+1.90 covers both: it parses edition 2024 manifests and satisfies Tauri's MSRV.
+`fallback` makes the resolver prefer crate versions whose `rust-version` fits
+ours, so a future re-resolution degrades to older crates instead of exploding.
+
+**Consequences.** Committing a `Cargo.lock` would be the strictly better fix for
+reproducibility, but it cannot be generated in this environment (no Rust
+toolchain, `static.rust-lang.org` and `index.crates.io` are unreachable), and a
+hand-written lockfile would be worse than none. `src/core/tauriConfig.test.ts`
+fails if the toolchain pin is ever older than the declared MSRV, if the MSRV is
+below 1.85, or if the resolver setting is dropped. Tracked as an open issue in
+`docs/FINAL-REPORT.md`.
