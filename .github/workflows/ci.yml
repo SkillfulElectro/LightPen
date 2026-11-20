@@ -122,7 +122,15 @@ jobs:
           # src-tauri/Cargo.lock is not committed (this is an app, but the lock
           # is generated on demand), so produce it before auditing it.
           cargo generate-lockfile --manifest-path src-tauri/Cargo.toml
-          cargo install cargo-audit --locked --version "^0.21"
+          # No pinned version, and no `cargo install`: the runner image already
+          # ships a recent cargo-audit. Installing `^0.21` replaced that 0.23
+          # with an older release whose advisory parser rejects CVSS 4.0, so
+          # every run died on `unsupported CVSS version: 4.0` before looking at
+          # a single dependency. Older releases only fall back to `cargo install`
+          # if the tool really is missing, which is not the case on GitHub's
+          # runners.
+          command -v cargo-audit >/dev/null || cargo install cargo-audit --locked
+          cargo audit --version
           cargo audit --file src-tauri/Cargo.lock
 
   workflow-lint:

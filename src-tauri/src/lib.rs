@@ -179,7 +179,7 @@ pub fn run() {
     #[cfg(desktop)]
     {
         builder = builder
-            .menu(|app| build_menu(app))
+            .menu(build_menu)
             .on_menu_event(|app, event| forward_menu_event(app, event.id()))
             .setup(|app| {
                 use tauri::Manager;
@@ -195,10 +195,14 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building LightPen");
 
-    app.run(|_app_handle, event| {
+    // The handler is only meaningful on macOS/iOS; the leading underscore keeps
+    // `-D warnings` (clippy) happy on the other platforms, where the body below
+    // compiles away and the parameter would otherwise be unused (and `_event`
+    // is still a usable name inside the `cfg` block).
+    app.run(|_app_handle, _event| {
         // macOS / iOS deliver files opened from Finder or another app here.
         #[cfg(any(target_os = "macos", target_os = "ios"))]
-        if let tauri::RunEvent::Opened { urls } = event {
+        if let tauri::RunEvent::Opened { urls } = _event {
             use tauri::Emitter;
             for url in urls {
                 if let Ok(path) = url.to_file_path() {

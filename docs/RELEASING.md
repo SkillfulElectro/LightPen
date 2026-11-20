@@ -133,6 +133,19 @@ Honest status of things that could **not** be executed in the environment this
 project was developed in. Treat these as “written and reviewed” rather than
 “proven”:
 
+- **`cargo audit` failed before auditing anything.** The step installed
+  `cargo-audit@^0.21`, _downgrading_ the 0.23 the runner image already ships, and
+  0.21's advisory parser cannot read CVSS 4.0: it aborted with `unsupported CVSS
+version: 4.0` while loading `RUSTSEC-2026-0211` from the database. Nothing is
+  pinned now — the bundled tool is used, with `cargo install` only as a
+  fallback — and `src/core/ciEnv.test.ts` fails if a version pin comes back.
+
+- **clippy had never actually run** (fmt failed first). Its first run found two
+  `-D warnings` errors in `lib.rs`: an unused `event` parameter on
+  `app.run(...)`, whose body only exists inside
+  `#[cfg(any(target_os = "macos", target_os = "ios"))]`, and a redundant
+  `.menu(|app| build_menu(app))` closure. Both fixed.
+
 - **The `actionlint` CI job only ever passed locally by accident.** Local checks
   used the WASM build of actionlint, which cannot spawn `shellcheck`; CI's native
   binary runs it on every `run:` block at _all_ severities. Five warnings were

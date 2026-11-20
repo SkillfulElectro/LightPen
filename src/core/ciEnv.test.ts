@@ -61,4 +61,17 @@ describe('CI workflow drift', () => {
       text.indexOf('cargo audit --file'),
     );
   });
+
+  it('never pins cargo-audit to a release that cannot parse CVSS 4.0', () => {
+    // `cargo install cargo-audit --version "^0.21"` downgraded the runner's
+    // bundled 0.23 and then died on
+    // `unsupported CVSS version: 4.0` while *loading* the advisory database,
+    // before looking at a single dependency. The runner image already provides
+    // the tool, so pin nothing and only install when it is genuinely absent.
+    const text = read('.github/workflows/ci.yml');
+    const step = text.slice(text.indexOf('- name: cargo audit'));
+    const body = step.slice(0, step.indexOf('- uses:') < 0 ? step.length : step.indexOf('- uses:'));
+    expect(body).not.toMatch(/cargo install cargo-audit[^\n]*--version/);
+    expect(body).toMatch(/command -v cargo-audit/);
+  });
 });

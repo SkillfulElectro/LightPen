@@ -12,7 +12,7 @@ development environment.
 | Formatting              | `npx prettier --check .`                                     | ✅ clean                                                                          |
 | Lint (zero warnings)    | `npx eslint . --max-warnings 0`                              | ✅ clean                                                                          |
 | TypeScript strict       | `npx tsc --noEmit`                                           | ✅ clean                                                                          |
-| Unit tests              | `npx vitest run`                                             | ✅ 189 tests in 20 files                                                          |
+| Unit tests              | `npx vitest run`                                             | ✅ 190 tests in 20 files                                                          |
 | Core coverage           | `npx vitest run --coverage`                                  | ✅ 98.4 % statements, 94.5 % branches, 95.8 % functions (threshold 80 %)          |
 | Dependency audit        | `npm audit --audit-level=high`                               | ✅ 0 vulnerabilities                                                              |
 | Rust formatting         | `rustfmt` (WASM build) on `src-tauri/src/*.rs`               | ✅ clean                                                                          |
