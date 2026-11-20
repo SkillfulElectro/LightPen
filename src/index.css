@@ -398,6 +398,18 @@ kbd {
   font-weight: 600;
 }
 
+.settings-help {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  margin: 0.25rem 0 0.5rem;
+}
+
+.settings-row {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
 .art-captions {
   list-style: none;
   padding: 0;

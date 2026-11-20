@@ -69,3 +69,49 @@ describe('tutorial reacts to live gestures', () => {
     await waitFor(() => expect(screen.getByText(/Nice! Step complete/)).toBeTruthy());
   });
 });
+
+describe('settings completeness', () => {
+  it('offers calibration re-run and every documented gesture toggle', async () => {
+    const { useStore } = await import('../store/useStore');
+    const { default: App } = await import('../App');
+    render(<App />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Settings' }));
+
+    // Gesture toggles + sensitivity controls from the brief.
+    for (const name of [
+      'Pinch sensitivity',
+      'Smoothing \\(jitter vs\\. lag\\)',
+      'Dominant hand',
+      'Theme',
+      'Language',
+      'Page swipe',
+      'Fist pause',
+      'Palm erase',
+      'Default pen width',
+      'Default pen colour',
+      'Preview mirroring',
+    ]) {
+      expect(screen.getByLabelText(new RegExp(name))).toBeTruthy();
+    }
+
+    // Calibration can be re-run from Settings; the tutorial opens on its step.
+    expect(screen.getByText(/Not calibrated yet/)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Re-run calibration' }));
+    await waitFor(() => expect(useStore.getState().tutorialOpen).toBe(true));
+    expect(useStore.getState().tutorialStartStep).toBe(3);
+    expect(await screen.findByText('Step 4 of 10')).toBeTruthy();
+  });
+
+  it('resets settings to defaults', async () => {
+    const { useStore } = await import('../store/useStore');
+    const { DEFAULT_SETTINGS } = await import('../core/types');
+    const { default: App } = await import('../App');
+    render(<App />);
+    useStore.getState().updateSettings({ penWidth: 9 });
+    fireEvent.click(await screen.findByRole('button', { name: 'Settings' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Reset to defaults' }));
+    await waitFor(() =>
+      expect(useStore.getState().settings.penWidth).toBe(DEFAULT_SETTINGS.penWidth),
+    );
+  });
+});

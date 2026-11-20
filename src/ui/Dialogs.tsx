@@ -89,6 +89,7 @@ export function SettingsDialog() {
   const settings = useStore((s) => s.settings);
   const update = useStore((s) => s.updateSettings);
   const reset = useStore((s) => s.resetSettings);
+  const requestCalibration = useStore((s) => s.requestCalibration);
   if (!open) return null;
   return (
     <Modal title={t('settings.title')} onClose={() => setOpen(false)}>
@@ -113,6 +114,47 @@ export function SettingsDialog() {
           value={settings.smoothingMinCutoff}
           onChange={(e) => update({ smoothingMinCutoff: Number(e.target.value) })}
         />
+      </label>
+      <label>
+        {t('settings.smoothingBeta')} ({settings.smoothingBeta.toFixed(2)})
+        <input
+          type="range"
+          min={0}
+          max={0.1}
+          step={0.005}
+          value={settings.smoothingBeta}
+          onChange={(e) => update({ smoothingBeta: Number(e.target.value) })}
+        />
+      </label>
+      <label>
+        {t('settings.penWidth')} ({settings.penWidth.toFixed(1)})
+        <input
+          type="range"
+          min={0.5}
+          max={12}
+          step={0.5}
+          value={settings.penWidth}
+          onChange={(e) => update({ penWidth: Number(e.target.value) })}
+        />
+      </label>
+      <label>
+        {t('settings.penColor')}
+        <input
+          type="color"
+          value={settings.penColor}
+          onChange={(e) => update({ penColor: e.target.value })}
+          aria-label={t('settings.penColor')}
+        />
+      </label>
+      <label>
+        {t('settings.mirrored')}
+        <select
+          value={settings.mirrored ? 'on' : 'off'}
+          onChange={(e) => update({ mirrored: e.target.value === 'on' })}
+        >
+          <option value="on">{t('settings.mirrorOn')}</option>
+          <option value="off">{t('settings.mirrorOff')}</option>
+        </select>
       </label>
       <label>
         {t('settings.dominantHand')}
@@ -168,6 +210,31 @@ export function SettingsDialog() {
           />
           {t('settings.enableErase')}
         </label>
+      </fieldset>
+      <fieldset>
+        <legend>{t('settings.calibration')}</legend>
+        <p className="settings-help">
+          {settings.calibration
+            ? t('settings.calibrationSet', {
+                x0: Math.round(settings.calibration.x0 * 100),
+                y0: Math.round(settings.calibration.y0 * 100),
+                x1: Math.round(settings.calibration.x1 * 100),
+                y1: Math.round(settings.calibration.y1 * 100),
+              })
+            : t('settings.calibrationUnset')}
+        </p>
+        <div className="settings-row">
+          <button type="button" onClick={requestCalibration}>
+            {t('settings.calibrate')}
+          </button>
+          <button
+            type="button"
+            onClick={() => update({ calibration: null })}
+            disabled={!settings.calibration}
+          >
+            {t('settings.clearCalibration')}
+          </button>
+        </div>
       </fieldset>
       <div className="modal-actions">
         <button type="button" onClick={reset}>

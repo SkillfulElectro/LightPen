@@ -68,11 +68,16 @@ interface AppState {
   noteGesture: (kind: string) => void;
 
   tutorialOpen: boolean;
-  setTutorialOpen: (open: boolean) => void;
+  /** Step to start on when the tutorial opens (0 = welcome). */
+  tutorialStartStep: number;
+  setTutorialOpen: (open: boolean, startStep?: number) => void;
   permissionOpen: boolean;
   setPermissionOpen: (open: boolean) => void;
   settingsOpen: boolean;
   setSettingsOpen: (open: boolean) => void;
+  /** Bumped when the user asks to re-run calibration from Settings. */
+  calibrateRequest: number;
+  requestCalibration: () => void;
   cheatSheetOpen: boolean;
   setCheatSheetOpen: (open: boolean) => void;
   shortcutsOpen: boolean;
@@ -204,7 +209,8 @@ export const useStore = create<AppState>((set, get) => ({
   noteGesture: (kind) => set({ lastGesture: { kind, seq: get().lastGesture.seq + 1 } }),
 
   tutorialOpen: false,
-  setTutorialOpen: (open) => {
+  tutorialStartStep: 0,
+  setTutorialOpen: (open, startStep = 0) => {
     if (!open) {
       try {
         localStorage.setItem(TUTORIAL_KEY, '1');
@@ -212,12 +218,21 @@ export const useStore = create<AppState>((set, get) => ({
         // ignore
       }
     }
-    set({ tutorialOpen: open });
+    set({ tutorialOpen: open, tutorialStartStep: startStep });
   },
   permissionOpen: false,
   setPermissionOpen: (open) => set({ permissionOpen: open }),
   settingsOpen: false,
   setSettingsOpen: (open) => set({ settingsOpen: open }),
+  calibrateRequest: 0,
+  requestCalibration: () => {
+    set({
+      settingsOpen: false,
+      tutorialOpen: true,
+      tutorialStartStep: 3,
+      calibrateRequest: get().calibrateRequest + 1,
+    });
+  },
   cheatSheetOpen: false,
   setCheatSheetOpen: (open) => set({ cheatSheetOpen: open }),
   shortcutsOpen: false,

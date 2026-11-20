@@ -19,6 +19,7 @@ export default function Tutorial() {
   const { t } = useTranslation();
   const open = useStore((s) => s.tutorialOpen);
   const setOpen = useStore((s) => s.setTutorialOpen);
+  const startStep = useStore((s) => s.tutorialStartStep);
   const [step, setStep] = useState(0);
   const [done, setDone] = useState<Set<Exercise>>(new Set());
   const [calRect, setCalRect] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(
@@ -34,10 +35,10 @@ export default function Tutorial() {
 
   useEffect(() => {
     if (open) {
-      setStep(0);
+      setStep(startStep);
       setDone(new Set());
     }
-  }, [open]);
+  }, [open, startStep]);
 
   const markDone = useCallback(
     (ex: Exercise) => {
@@ -189,7 +190,7 @@ export default function Tutorial() {
                 className="btn-primary"
                 onClick={() => {
                   void startTracking();
-                  setStep(2);
+                  setStep(Math.min(2, TOTAL_STEPS - 1));
                 }}
               >
                 {t('camera.allow')}

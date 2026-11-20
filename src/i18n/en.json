@@ -107,7 +107,18 @@
     "gestures": "Gestures",
     "enableSwipe": "Page swipe",
     "enablePause": "Fist pause",
-    "enableErase": "Palm erase"
+    "enableErase": "Palm erase",
+    "smoothingBeta": "Smoothing speed response",
+    "penWidth": "Default pen width",
+    "penColor": "Default pen colour",
+    "mirrored": "Preview mirroring",
+    "mirrorOn": "Mirrored (selfie view)",
+    "mirrorOff": "Not mirrored",
+    "calibration": "Writing area calibration",
+    "calibrationSet": "Current area: x {{x0}}–{{x1}}%, y {{y0}}–{{y1}}% of the camera frame.",
+    "calibrationUnset": "Not calibrated yet — the whole camera frame maps to the page.",
+    "calibrate": "Re-run calibration",
+    "clearCalibration": "Use the whole frame"
   },
   "shortcuts": {
     "title": "Keyboard shortcuts",
