@@ -73,6 +73,27 @@ describe('sanitizeSettings extra rules', () => {
   });
 });
 
+describe('gesture mode', () => {
+  it('defaults to air, so an upgrade does not change what a gesture means', () => {
+    expect(sanitizeSettings(null).gestureMode).toBe('air');
+    expect(DEFAULT_SETTINGS.gestureMode).toBe('air');
+  });
+
+  it('keeps touch mode across a save and reload', () => {
+    expect(sanitizeSettings({ gestureMode: 'touch' }).gestureMode).toBe('touch');
+  });
+
+  it('falls back to air for an unknown mode rather than failing to load', () => {
+    expect(sanitizeSettings({ gestureMode: 'kinect' } as never).gestureMode).toBe('air');
+  });
+
+  it('clamps the zoom sensitivity to a usable range', () => {
+    expect(sanitizeSettings({ zoomSensitivity: 100 }).zoomSensitivity).toBeLessThanOrEqual(4);
+    expect(sanitizeSettings({ zoomSensitivity: 0 }).zoomSensitivity).toBeGreaterThanOrEqual(0.25);
+    expect(sanitizeSettings({ zoomSensitivity: 1.5 }).zoomSensitivity).toBe(1.5);
+  });
+});
+
 describe('sensitivity helpers', () => {
   it('maps sensitivity onto a bounded pinch threshold, monotonically', () => {
     expect(sensitivityToPinchThreshold(1)).toBeCloseTo(0.15);

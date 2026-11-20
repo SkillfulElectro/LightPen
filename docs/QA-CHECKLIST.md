@@ -20,7 +20,10 @@ need a human, a real camera and real hardware. Copy this list into the release P
 - [ ] Keyboard shortcuts work, `?` shows the reference, focus ring is visible on every control.
 - [ ] Dark, light and system themes; no contrast failures (spot-check with a contrast checker).
 - [ ] Camera: rationale appears before the OS prompt; denial message is actionable; unplugging the camera mid-session is handled.
-- [ ] Hand tracking FPS shown; write / hover / erase / swipe / fist-pause all work with a real webcam.
+- [ ] **AppImage specifically**: the camera lists and tracks on a machine that has never had GStreamer plugins installed for this app. If it reports "no device" while `gst-inspect-1.0 v4l2src` works, the image was built without `bundleMediaFramework` or without the plugins on the build machine — see [`RELEASING.md`](RELEASING.md).
+- [ ] Hand tracking FPS shown; write / hover / erase / swipe / fist-pause all work with a real webcam (air mode).
+- [ ] Touch mode, same webcam: an extended pinched index draws, a **curled** index stops drawing (a lifted finger must not ink a connecting line), a quick pinch leaves no dot, two fingers turn pages and zoom, a still pinch pauses.
+- [ ] The cheat sheet shows the vocabulary of the mode in use, and switching modes in Settings updates it immediately.
 - [ ] Silence the camera (cover it) → "low light" hint appears; move the hand out of frame → "out of frame" hint.
 - [ ] Switching to another window stops the stream (camera LED off).
 - [ ] Window size and position restore after restart.

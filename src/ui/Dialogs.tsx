@@ -8,6 +8,7 @@ import {
   sensitivityToPinchThreshold,
 } from '../core/settings';
 import { LANGUAGES, initI18n } from '../i18n';
+import type { GestureMode } from '../core/types';
 import { useStore } from '../store/useStore';
 import { PauseIllustration } from './illustrations';
 import { startTracking } from './trackingHandle';
@@ -209,30 +210,67 @@ export function SettingsDialog() {
       </label>
       <fieldset>
         <legend>{t('settings.gestures')}</legend>
-        <label className="check">
-          <input
-            type="checkbox"
-            checked={settings.enablePageSwipe}
-            onChange={(e) => update({ enablePageSwipe: e.target.checked })}
-          />
-          {t('settings.enableSwipe')}
+        <label>
+          {t('settings.gestureMode')}
+          <select
+            value={settings.gestureMode}
+            onChange={(e) => update({ gestureMode: e.target.value as GestureMode })}
+            aria-describedby="gesture-mode-help"
+          >
+            <option value="air">{t('settings.modeAir')}</option>
+            <option value="touch">{t('settings.modeTouch')}</option>
+          </select>
         </label>
-        <label className="check">
-          <input
-            type="checkbox"
-            checked={settings.enablePauseFist}
-            onChange={(e) => update({ enablePauseFist: e.target.checked })}
-          />
-          {t('settings.enablePause')}
-        </label>
-        <label className="check">
-          <input
-            type="checkbox"
-            checked={settings.enableErase}
-            onChange={(e) => update({ enableErase: e.target.checked })}
-          />
-          {t('settings.enableErase')}
-        </label>
+        <p className="settings-help" id="gesture-mode-help">
+          {settings.gestureMode === 'touch'
+            ? t('settings.modeTouchHelp')
+            : t('settings.modeAirHelp')}
+        </p>
+        {/* The gesture switches that follow only exist in air mode; touch mode
+            has the phone vocabulary instead. Hidden rather than removed so the
+            stored choices survive a round trip through the other mode. */}
+        {settings.gestureMode === 'air' && (
+          <>
+            <label className="check">
+              <input
+                type="checkbox"
+                checked={settings.enablePageSwipe}
+                onChange={(e) => update({ enablePageSwipe: e.target.checked })}
+              />
+              {t('settings.enableSwipe')}
+            </label>
+            <label className="check">
+              <input
+                type="checkbox"
+                checked={settings.enablePauseFist}
+                onChange={(e) => update({ enablePauseFist: e.target.checked })}
+              />
+              {t('settings.enablePause')}
+            </label>
+            <label className="check">
+              <input
+                type="checkbox"
+                checked={settings.enableErase}
+                onChange={(e) => update({ enableErase: e.target.checked })}
+              />
+              {t('settings.enableErase')}
+            </label>
+          </>
+        )}
+        {settings.gestureMode === 'touch' && (
+          <label>
+            {t('settings.zoomSensitivity')}
+            <input
+              type="range"
+              min={0.25}
+              max={4}
+              step={0.25}
+              value={settings.zoomSensitivity}
+              onChange={(e) => update({ zoomSensitivity: Number(e.target.value) })}
+              aria-label={t('settings.zoomSensitivity')}
+            />
+          </label>
+        )}
       </fieldset>
       <fieldset>
         <legend>{t('settings.calibration')}</legend>
@@ -275,16 +313,37 @@ export function CheatSheet() {
   const { t } = useTranslation();
   const open = useStore((s) => s.cheatSheetOpen);
   const setOpen = useStore((s) => s.setCheatSheetOpen);
+  const mode = useStore((s) => s.settings.gestureMode);
   if (!open) return null;
+  const gestures =
+    mode === 'touch'
+      ? [
+          ['☝️', t('gestures.touchPoint')],
+          ['👌', t('gestures.touchDrag')],
+          ['⚡', t('gestures.touchTap')],
+          ['✌️', t('gestures.touchScroll')],
+          ['🤏', t('gestures.touchZoom')],
+          ['✊', t('gestures.touchLongPress')],
+        ]
+      : [
+          ['✌️', t('gestures.penDown')],
+          ['👉', t('gestures.hover')],
+          ['🖐️', t('gestures.erase')],
+          ['👋', t('gestures.swipe')],
+          ['✊', t('gestures.pause')],
+        ];
   return (
     <Modal title={t('toolbar.cheatSheet')} onClose={() => setOpen(false)}>
-      <PauseIllustration label={t('gestures.pauseArt')} />
+      <p className="settings-help">
+        {mode === 'touch' ? t('gestures.modeTouch') : t('gestures.modeAir')}
+      </p>
+      {mode === 'air' && <PauseIllustration label={t('gestures.pauseArt')} />}
       <ul className="cheat-list">
-        <li>✌️ {t('gestures.penDown')}</li>
-        <li>👉 {t('gestures.hover')}</li>
-        <li>🖐️ {t('gestures.erase')}</li>
-        <li>👋 {t('gestures.swipe')}</li>
-        <li>✊ {t('gestures.pause')}</li>
+        {gestures.map(([icon, label]) => (
+          <li key={label}>
+            {icon} {label}
+          </li>
+        ))}
       </ul>
     </Modal>
   );

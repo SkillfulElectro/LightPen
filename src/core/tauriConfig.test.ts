@@ -18,7 +18,11 @@ import { join } from 'node:path';
 
 const read = (p: string) => readFileSync(join(process.cwd(), p), 'utf8');
 const conf = JSON.parse(read('src-tauri/tauri.conf.json')) as {
-  bundle: { targets: string[]; active: boolean };
+  bundle: {
+    targets: string[];
+    active: boolean;
+    linux: { appimage: { bundleMediaFramework: boolean } };
+  };
   build: { frontendDist: string };
   app: { security: { capabilities: string[] } };
 };
@@ -65,6 +69,14 @@ describe('tauri.conf.json', () => {
   it('keeps the frontend dist the bundler expects', () => {
     expect(conf.build.frontendDist).toBe('../dist');
     expect(conf.bundle.active).toBe(true);
+  });
+
+  it('ships the GStreamer capture plugins in the AppImage', () => {
+    // Without this, Tauri's AppRun points GStreamer at an AppImage directory
+    // that is never populated, WebKitGTK sees zero cameras and getUserMedia
+    // fails with "Video capture was requested but no device was found amongst
+    // 0 devices" — on the AppImage only, so a .deb/.rpm test would not catch it.
+    expect(conf.bundle.linux.appimage.bundleMediaFramework).toBe(true);
   });
 
   it('references capability files that exist', () => {
