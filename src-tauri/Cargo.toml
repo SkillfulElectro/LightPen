@@ -14,10 +14,14 @@ name = "lightpen_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
-tauri-build = { version = "2", features = [] }
+tauri-build = { version = "2.12", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = [] }
+# >= 2.12 is load-bearing, not freshness: `Builder::on_permission_request`
+# (used in lib.rs to grant the camera on Linux/WebKitGTK) was added in
+# Tauri 2.12. A bare "2" would let a pinned/old resolution compile-fail —
+# or, worse, tempt removing the handler to make it build.
+tauri = { version = "2.12", features = [] }
 tauri-plugin-dialog = "2"
 tauri-plugin-fs = "2"
 tauri-plugin-opener = "2"

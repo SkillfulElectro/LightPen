@@ -84,6 +84,15 @@ Verify downloads with `SHA256SUMS.txt` attached to every release:
 sha256sum -c SHA256SUMS.txt --ignore-missing
 ```
 
+> **Linux, including Arch/CachyOS:** use the `.AppImage` (Tauri has no
+> `pacman` bundle; the image bundles the camera stack). The app grants
+> its own webview camera permission — there is no browser prompt — but
+> your user still needs access to the camera device: if the camera is
+> reported as denied, run `sudo usermod -aG video "$USER"`, log out and
+> back in, and (for source builds) install
+> `sudo pacman -S gst-plugins-good gst-plugin-pipewire`. Details in
+> [`docs/RELEASING.md`](docs/RELEASING.md#linux-camera-permission-webkitgtk--incl-cachyosarch).
+
 ## Development
 
 Requirements: **Node.js 20+** (see `.nvmrc`), **Rust 1.90** (see `rust-toolchain.toml`), and the [Tauri 2 prerequisites](https://tauri.app/start/prerequisites/) for your OS.

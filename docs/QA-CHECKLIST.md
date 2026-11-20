@@ -20,6 +20,7 @@ need a human, a real camera and real hardware. Copy this list into the release P
 - [ ] Keyboard shortcuts work, `?` shows the reference, focus ring is visible on every control.
 - [ ] Dark, light and system themes; no contrast failures (spot-check with a contrast checker).
 - [ ] Camera: rationale appears before the OS prompt; denial message is actionable; unplugging the camera mid-session is handled.
+- [ ] **Linux (incl. CachyOS/Arch)**: starting the camera shows no “permission denied” error and never did show a browser-style prompt (the app itself grants the webview request — ADR-023); with the user removed from the `video` group, the denial message names that fix; AppImage and `.deb` both track on a machine without pre-installed GStreamer capture plugins.
 - [ ] **AppImage specifically**: the camera lists and tracks on a machine that has never had GStreamer plugins installed for this app. If it reports "no device" while `gst-inspect-1.0 v4l2src` works, the image was built without `bundleMediaFramework` or without the plugins on the build machine — see [`RELEASING.md`](RELEASING.md).
 - [ ] Hand tracking FPS shown; write / hover / erase / swipe / fist-pause all work with a real webcam (air mode).
 - [ ] Touch mode, same webcam: an extended pinched index draws, a **curled** index stops drawing (a lifted finger must not ink a connecting line), a quick pinch leaves no dot, two fingers turn pages and zoom, a still pinch pauses.

@@ -1,5 +1,15 @@
 /**
  * Camera access via getUserMedia. All frames stay on-device.
+ *
+ * Permission is a native concern, not a browser prompt, in the packaged
+ * app: `src-tauri/src/lib.rs` answers the webview's permission request
+ * (`Builder::on_permission_request`, camera-only). Without that handler
+ * WebKitGTK denied every request on Linux — the CachyOS “camera
+ * permission is not granted” report — and no retry or looser constraint
+ * in this file could have fixed it. A `denied` result here therefore
+ * means a genuine system-level refusal (OS settings, portal, device
+ * node permissions), which is what `camera.denied` now tells the user
+ * to check.
  */
 
 export type CameraErrorKind =

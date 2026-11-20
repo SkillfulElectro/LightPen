@@ -40,7 +40,7 @@
     "rationaleBody": "LightPen uses your camera to track your hand so you can write in the air. Nothing is recorded or uploaded. The camera is only on while tracking is active.",
     "allow": "Allow camera",
     "notNow": "Not now",
-    "denied": "Camera permission was denied. You can still draw with your mouse or finger.",
+    "denied": "Camera permission was denied. Check your system camera settings and close any other app using the camera, then try again — on Linux/Arch (CachyOS), make sure your user is in the 'video' group and log back in after adding it. You can still draw with your mouse or finger.",
     "notFound": "No camera was found. Check that one is connected.",
     "inUse": "The camera is in use by another app. Close it and try again.",
     "unsupported": "Camera is not supported here. You can still draw manually.",
@@ -55,7 +55,7 @@
     "modelMissing": "Hand-tracking model not found. Run `npm run fetch:model` or reinstall the app.",
     "expand": "Show camera preview",
     "collapse": "Hide camera preview",
-    "noCapturePlugins": "The camera could not be opened because the video stack is missing from this build. On Linux, use the .deb or .rpm package instead of the AppImage, or install gstreamer1.0-plugins-good and gstreamer1.0-pipewire."
+    "noCapturePlugins": "The camera could not be opened because the video stack is missing. On Arch/CachyOS run: sudo pacman -S gst-plugins-good gst-plugin-pipewire. On Debian/Ubuntu run: sudo apt install gstreamer1.0-plugins-good gstreamer1.0-pipewire. Or use the AppImage, which bundles them. Then restart LightPen."
   },
   "gestures": {
     "penDown": "Pinch thumb + index to write",

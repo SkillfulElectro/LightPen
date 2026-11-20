@@ -30,7 +30,14 @@ describe('dynamic message keys', () => {
   });
 
   it('resolves every camera error kind', () => {
-    const kinds: CameraErrorKind[] = ['denied', 'not-found', 'in-use', 'unsupported', 'unknown'];
+    const kinds: CameraErrorKind[] = [
+      'denied',
+      'not-found',
+      'in-use',
+      'unsupported',
+      'no-capture',
+      'unknown',
+    ];
     for (const kind of kinds) {
       const key = CAMERA_ERROR_MESSAGE_KEY[kind];
       expect(resolve(key), `${kind} → ${key}`).toBeTruthy();
