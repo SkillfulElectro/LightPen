@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
+import { LANGUAGES, initI18n } from '../i18n';
 import { useStore } from '../store/useStore';
 import { PauseIllustration } from './illustrations';
 import { startTracking } from './trackingHandle';
@@ -180,8 +181,18 @@ export function SettingsDialog() {
       </label>
       <label>
         {t('settings.language')}
-        <select value={settings.language} onChange={(e) => update({ language: e.target.value })}>
-          <option value="en">English</option>
+        <select
+          value={settings.language}
+          onChange={(e) => {
+            update({ language: e.target.value });
+            void initI18n(e.target.value);
+          }}
+        >
+          {LANGUAGES.map((lang) => (
+            <option key={lang.code} value={lang.code}>
+              {lang.label}
+            </option>
+          ))}
         </select>
       </label>
       <fieldset>
