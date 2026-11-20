@@ -113,7 +113,24 @@ viewer.
    which closes the polyline and turns handwriting into a polygon. Only
    `borderColor` + `borderWidth` are passed, so the operator is `S` (stroke).
 
-## ADR-016 — "Open with" is size-capped, dialog is not
+## ADR-016 — Rotation handled through the pdf.js viewport matrix
+
+**Decision.** Every PDF ↔ canvas conversion goes through
+`pageViewportMatrix(page, rotation, scale)` + `pdfToViewport` / `viewportToPdf`
+in `src/core/coords.ts`. The matrices are unit-tested against the exact values
+pdf.js produces for rotations 0/90/180/270.
+
+**Why.** Naively using `scaleW = canvasWidth / pageWidth` silently breaks on
+rotated pages: the displayed width is the page _height_ for 90°/270°, so ink is
+drawn in the wrong place and, worse, points are clamped to the wrong axis.
+Reading the geometry on demand (`getPageGeometry`) also keeps large documents
+opening fast — page sizes are no longer parsed up front.
+
+**Consequences.** The overlay canvas, the hand cursor, hit-testing and the
+stored strokes all share one matrix, so a rotated page behaves exactly like an
+unrotated one.
+
+## ADR-017 — "Open with" is size-capped, dialog is not
 
 **Decision.** Files handed over by the OS (double-click, Finder, CLI argument)
 are read in Rust with a 32 MB cap and a `.pdf` extension check; the file dialog

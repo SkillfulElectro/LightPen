@@ -35,32 +35,51 @@ export async function loadPdf(bytes: Uint8Array): Promise<LoadedPdf> {
     throw err;
   }
   const doc = await pdfjs.getDocument({ data: bytes.slice(), isEvalSupported: false }).promise;
-  // Read page sizes lazily: large documents are not fully parsed up front.
-  const pageSizes: PageSize[] = new Array<PageSize>(doc.numPages).fill({ width: 612, height: 792 });
-  const probe = Math.min(doc.numPages, 5);
-  for (let i = 1; i <= probe; i++) {
-    const page = await doc.getPage(i);
-    const viewport = page.getViewport({ scale: 1 });
-    pageSizes[i - 1] = { width: viewport.width, height: viewport.height };
-    page.cleanup();
+  // Page sizes are read lazily (getPageGeometry) so large documents open fast;
+  // only the first page is probed here, as a sensible initial default.
+  const pageSizes: PageSize[] = new Array<PageSize>(doc.numPages).fill({
+    width: 612,
+    height: 792,
+  });
+  try {
+    const first = await doc.getPage(1);
+    const viewport = first.getViewport({ scale: 1 });
+    pageSizes[0] = { width: viewport.width, height: viewport.height };
+    first.cleanup();
+  } catch {
+    // Fall back to Letter; the viewer reports real page errors.
   }
   return { doc, pageCount: doc.numPages, pageSizes };
 }
 
-/** Page size of an arbitrary page, loading it on demand and caching the result. */
-export async function getPageSize(
+/** Page geometry (size in PDF points + rotation) of an arbitrary page. */
+export interface PageGeometry {
+  width: number;
+  height: number;
+  rotate: 0 | 90 | 180 | 270;
+}
+
+/** Page geometry of an arbitrary page, loading it on demand and caching it. */
+export async function getPageGeometry(
   doc: pdfjs.PDFDocumentProxy,
   pageIndex: number,
-  cache: PageSize[],
-): Promise<PageSize> {
+  cache: (PageGeometry | undefined)[],
+): Promise<PageGeometry> {
   const cached = cache[pageIndex];
-  if (cached && cached.width !== 612) return cached;
+  if (cached) return cached;
   const page = await doc.getPage(pageIndex + 1);
   const viewport = page.getViewport({ scale: 1 });
-  const size = { width: viewport.width, height: viewport.height };
+  const rotate = ((page.rotate % 360) + 360) % 360;
+  const geometry: PageGeometry = {
+    width: viewport.width,
+    height: viewport.height,
+    rotate: (rotate === 90 || rotate === 180 || rotate === 270
+      ? rotate
+      : 0) as PageGeometry['rotate'],
+  };
   page.cleanup();
-  cache[pageIndex] = size;
-  return size;
+  cache[pageIndex] = geometry;
+  return geometry;
 }
 
 /**

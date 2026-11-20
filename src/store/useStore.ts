@@ -35,6 +35,9 @@ interface AppState {
 
   pdf: PdfDoc | null;
   setPdf: (doc: PdfDoc | null) => void;
+  /** Size of the page currently on screen (used for air-writing mapping). */
+  currentPageSize: PageSize;
+  setCurrentPageSize: (size: PageSize) => void;
   currentPage: number;
   setCurrentPage: (page: number) => void;
   zoom: number;
@@ -115,6 +118,12 @@ export const useStore = create<AppState>((set, get) => ({
 
   pdf: null,
   setPdf: (doc) => set({ pdf: doc, currentPage: 0 }),
+  currentPageSize: { width: 612, height: 792 },
+  setCurrentPageSize: (size) => {
+    const prev = get().currentPageSize;
+    if (prev.width === size.width && prev.height === size.height) return;
+    set({ currentPageSize: size });
+  },
   currentPage: 0,
   setCurrentPage: (page) => {
     const { pdf } = get();

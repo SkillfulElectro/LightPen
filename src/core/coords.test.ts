@@ -6,7 +6,10 @@ import {
   frameBrightness,
   isLowLight,
   pageToCanvas,
-  rotatePagePoint,
+  pdfToViewport,
+  pageDisplaySize,
+  pageViewportMatrix,
+  viewportToPdf,
   trackingHint,
 } from './coords';
 
@@ -107,21 +110,66 @@ describe('lighting heuristics', () => {
   });
 });
 
-describe('rotatePagePoint', () => {
-  const page = { width: 100, height: 100 };
+describe('viewport matrix helpers', () => {
+  // pdf.js matrix for an unrotated A4 page at scale 1: y is flipped, origin top-left.
+  const PORTRAIT = [1, 0, 0, -1, 0, 842] as const;
+  // Rotated 90°: pdf.js swaps the axes.
+  const LANDSCAPE_90 = [0, 1, 1, 0, 0, 0] as const;
 
-  it('leaves points untouched at 0 degrees', () => {
-    expect(rotatePagePoint({ x: 10, y: 20 }, page, 0)).toEqual({ x: 10, y: 20 });
+  it('maps PDF corners to canvas corners', () => {
+    expect(pdfToViewport({ x: 0, y: 842 }, PORTRAIT)).toEqual({ x: 0, y: 0 });
+    expect(pdfToViewport({ x: 595, y: 0 }, PORTRAIT)).toEqual({ x: 595, y: 842 });
   });
 
-  it('rotates 90/180/270 around the page centre', () => {
-    const p = { x: 75, y: 50 }; // right of centre
-    const r90 = rotatePagePoint(p, page, 90);
-    expect(r90.x).toBeCloseTo(50);
-    expect(r90.y).toBeCloseTo(75);
-    expect(rotatePagePoint(p, page, 180)).toEqual({ x: 25, y: 50 });
-    const r270 = rotatePagePoint(p, page, 270);
-    expect(r270.x).toBeCloseTo(50);
-    expect(r270.y).toBeCloseTo(25);
+  it('round-trips through the inverse transform', () => {
+    for (const m of [PORTRAIT, LANDSCAPE_90]) {
+      const start = { x: 123.5, y: 456.25 };
+      const back = viewportToPdf(pdfToViewport(start, m).x, pdfToViewport(start, m).y, m);
+      expect(back.x).toBeCloseTo(start.x);
+      expect(back.y).toBeCloseTo(start.y);
+    }
+  });
+
+  it('respects page rotation', () => {
+    const p = pdfToViewport({ x: 100, y: 200 }, LANDSCAPE_90);
+    expect(p).toEqual({ x: 200, y: 100 });
+  });
+
+  it('returns the origin for a degenerate matrix instead of NaN', () => {
+    expect(viewportToPdf(5, 5, [0, 0, 0, 0, 0, 0])).toEqual({ x: 0, y: 0 });
+  });
+
+  it('computes displayed size for each rotation', () => {
+    const letter = { width: 612, height: 792 };
+    expect(pageDisplaySize(letter, 0, 1)).toEqual({ width: 612, height: 792 });
+    expect(pageDisplaySize(letter, 90, 1)).toEqual({ width: 792, height: 612 });
+    expect(pageDisplaySize(letter, 180, 2)).toEqual({ width: 1224, height: 1584 });
+    expect(pageDisplaySize(letter, 270, 1)).toEqual({ width: 792, height: 612 });
+  });
+
+  it('builds matrices that match pdf.js for every rotation', () => {
+    const letter = { width: 612, height: 792 };
+    // Expected matrices taken from pdf.js `page.getViewport({ scale: 1 })`.
+    expect(pageViewportMatrix(letter, 0, 1)).toEqual([1, 0, 0, -1, 0, 792]);
+    expect(pageViewportMatrix(letter, 90, 1)).toEqual([0, 1, 1, 0, 0, 0]);
+    expect(pageViewportMatrix(letter, 180, 1)).toEqual([-1, 0, 0, 1, 612, 0]);
+    expect(pageViewportMatrix(letter, 270, 1)).toEqual([0, -1, -1, 0, 792, 612]);
+  });
+
+  it('maps a display point back to the same PDF point for rotated pages', () => {
+    const letter = { width: 612, height: 792 };
+    for (const rotation of [0, 90, 180, 270] as const) {
+      const m = pageViewportMatrix(letter, rotation, 1.5);
+      const start = { x: 200, y: 300 };
+      const disp = pdfToViewport(start, m);
+      const back = viewportToPdf(disp.x, disp.y, m);
+      expect(back.x).toBeCloseTo(start.x);
+      expect(back.y).toBeCloseTo(start.y);
+      const size = pageDisplaySize(letter, rotation, 1.5);
+      expect(disp.x).toBeGreaterThanOrEqual(0);
+      expect(disp.y).toBeGreaterThanOrEqual(0);
+      expect(disp.x).toBeLessThanOrEqual(size.width + 1e-6);
+      expect(disp.y).toBeLessThanOrEqual(size.height + 1e-6);
+    }
   });
 });

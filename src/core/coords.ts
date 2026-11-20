@@ -123,27 +123,64 @@ export function isLowLight(brightness: number): boolean {
 }
 
 /**
- * Rotate a PDF-space point around the page centre.
- * `rotation` is in degrees, matching the page rotation reported by pdf.js.
- * Kept in `core` because it is pure geometry, independent of rendering.
+ * pdf.js viewport transform: `[a, b, c, d, e, f]` mapping PDF user space
+ * (bottom-left origin) to canvas CSS pixels (top-left origin). It already
+ * accounts for page rotation, so every conversion goes through this matrix
+ * instead of ad-hoc arithmetic.
  */
-export function rotatePagePoint(
-  point: PdfPoint,
+export type ViewportMatrix = readonly [number, number, number, number, number, number];
+
+/** PDF point → canvas CSS pixel. */
+export function pdfToViewport(point: PdfPoint, m: ViewportMatrix): { x: number; y: number } {
+  const [a, b, c, d, e, f] = m;
+  return { x: a * point.x + c * point.y + e, y: b * point.x + d * point.y + f };
+}
+
+/** Canvas CSS pixel → PDF point (inverse of `pdfToViewport`). */
+export function viewportToPdf(x: number, y: number, m: ViewportMatrix): PdfPoint {
+  const [a, b, c, d, e, f] = m;
+  const det = a * d - b * c;
+  if (det === 0) return { x: 0, y: 0 };
+  const dx = x - e;
+  const dy = y - f;
+  return { x: (d * dx - c * dy) / det, y: (-b * dx + a * dy) / det };
+}
+
+/** Page rotation in degrees, as reported by pdf.js (`page.rotate`). */
+export type PageRotation = 0 | 90 | 180 | 270;
+
+/** Displayed page size in CSS pixels for a rotation and zoom scale. */
+export function pageDisplaySize(
   page: PageSize,
-  rotation: 0 | 90 | 180 | 270,
-): PdfPoint {
-  const cx = page.width / 2;
-  const cy = page.height / 2;
-  const dx = point.x - cx;
-  const dy = point.y - cy;
+  rotation: PageRotation,
+  scale: number,
+): { width: number; height: number } {
+  const w = page.width * scale;
+  const h = page.height * scale;
+  return rotation === 90 || rotation === 270 ? { width: h, height: w } : { width: w, height: h };
+}
+
+/**
+ * Viewport transform for a page at a zoom scale, equivalent to pdf.js's
+ * `page.getViewport({ scale }).transform` but computed without a page proxy.
+ * Values verified against pdf.js for rotations 0/90/180/270.
+ */
+export function pageViewportMatrix(
+  page: PageSize,
+  rotation: PageRotation,
+  scale: number,
+): ViewportMatrix {
+  const s = scale;
+  const w = page.width * s;
+  const h = page.height * s;
   switch (rotation) {
     case 90:
-      return { x: cx - dy, y: cy + dx };
+      return [0, s, s, 0, 0, 0];
     case 180:
-      return { x: cx - dx, y: cy - dy };
+      return [-s, 0, 0, s, w, 0];
     case 270:
-      return { x: cx + dy, y: cy - dx };
+      return [0, -s, -s, 0, h, w];
     default:
-      return { x: point.x, y: point.y };
+      return [s, 0, 0, -s, 0, h];
   }
 }

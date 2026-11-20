@@ -8,13 +8,21 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { addPoint, createStroke, hexToRgb } from '../core/annotations';
-import { canvasToPage, clampToPage, pageToCanvas } from '../core/coords';
+import {
+  clampToPage,
+  pageDisplaySize,
+  pageViewportMatrix,
+  pdfToViewport,
+  viewportToPdf,
+} from '../core/coords';
+import type { ViewportMatrix } from '../core/coords';
 import type { PageSize, Stroke } from '../core/types';
 import {
   classifyPdfError,
-  getPageSize,
+  getPageGeometry,
   loadPdf,
   usePageRenderer,
+  type PageGeometry,
   type PdfErrorKind,
 } from '../hooks/usePdfDocument';
 import { restoreAnnotations, useStore } from '../store/useStore';
@@ -34,7 +42,6 @@ export default function PdfViewer({ pdfBytes, pdfName, onPdfLoaded }: Props) {
   const cursorCanvasRef = useRef<HTMLCanvasElement>(null);
   const [doc, setDoc] = useState<Awaited<ReturnType<typeof loadPdf>>['doc'] | null>(null);
   const [error, setError] = useState<PdfErrorKind | null>(null);
-  const [pageSizes, setPageSizes] = useState<PageSize[]>([]);
   const [containerWidth, setContainerWidth] = useState(800);
   const [containerHeight, setContainerHeight] = useState(700);
   const [dragOver, setDragOver] = useState(false);
@@ -52,7 +59,6 @@ export default function PdfViewer({ pdfBytes, pdfName, onPdfLoaded }: Props) {
   useEffect(() => {
     if (!pdfBytes) {
       setDoc(null);
-      setPageSizes([]);
       return;
     }
     let cancelled = false;
@@ -61,7 +67,6 @@ export default function PdfViewer({ pdfBytes, pdfName, onPdfLoaded }: Props) {
       .then(async (loaded) => {
         if (cancelled) return;
         setDoc(loaded.doc);
-        setPageSizes(loaded.pageSizes);
         onPdfLoaded(pdfName ?? 'document.pdf', pdfBytes, loaded.pageCount, loaded.pageSizes);
         await restoreAnnotations(pdfName ?? 'document.pdf');
         // Validate annotations against the real page count: a sidecar from a
@@ -94,22 +99,20 @@ export default function PdfViewer({ pdfBytes, pdfName, onPdfLoaded }: Props) {
     return () => ro.disconnect();
   }, []);
 
-  // Fallback size for pages whose dimensions have not been read yet.
-  const [dynSize, setDynSize] = useState<PageSize | null>(null);
-  const pageSize = useMemo<PageSize>(() => {
-    const known = pageSizes[currentPage];
-    if (known && known.width !== 612) return known;
-    return dynSize ?? { width: 612, height: 792 };
-  }, [pageSizes, currentPage, dynSize]);
-
-  // Read the size of the visible page on demand (large documents are lazy).
+  // Geometry (size + rotation) of the visible page, read on demand so large
+  // documents are not parsed up front.
+  const geometryCache = useRef<(PageGeometry | undefined)[]>([]);
+  const [geometry, setGeometry] = useState<PageGeometry | null>(null);
   useEffect(() => {
-    if (!doc) return;
+    if (!doc) {
+      setGeometry(null);
+      return;
+    }
     let cancelled = false;
-    setDynSize(null);
-    getPageSize(doc, currentPage, pageSizes)
-      .then((size) => {
-        if (!cancelled) setDynSize(size);
+    setGeometry(null);
+    getPageGeometry(doc, currentPage, geometryCache.current)
+      .then((g) => {
+        if (!cancelled) setGeometry(g);
       })
       .catch(() => {
         // Keep the Letter fallback; the render path reports real errors.
@@ -117,19 +120,43 @@ export default function PdfViewer({ pdfBytes, pdfName, onPdfLoaded }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [doc, currentPage, pageSizes]);
+  }, [doc, currentPage]);
+
+  const pageGeometry = useMemo<PageGeometry>(
+    () => geometry ?? { width: 612, height: 792, rotate: 0 },
+    [geometry],
+  );
+  const pageSize = useMemo<PageSize>(
+    () => ({ width: pageGeometry.width, height: pageGeometry.height }),
+    [pageGeometry],
+  );
+  const rotation = pageGeometry.rotate;
+  // Publish the on-screen page size so air-writing maps onto the right page.
+  const setCurrentPageSize = useStore((s) => s.setCurrentPageSize);
+  useEffect(() => {
+    setCurrentPageSize(pageSize);
+  }, [pageSize, setCurrentPageSize]);
+
+  const display = pageDisplaySize(pageSize, rotation, 1);
   const scale =
     fitMode === 'fit-width'
-      ? Math.max((containerWidth - 32) / pageSize.width, 0.1)
+      ? Math.max((containerWidth - 32) / display.width, 0.1)
       : fitMode === 'fit-page'
         ? Math.max(
             Math.min(
-              (containerWidth - 32) / pageSize.width,
-              (containerHeight - 32) / pageSize.height,
+              (containerWidth - 32) / display.width,
+              (containerHeight - 32) / display.height,
             ),
             0.1,
           )
         : zoom;
+  /** PDF user space → canvas CSS pixels (rotation-aware, mirrors pdf.js). */
+  const matrix = useMemo(
+    () => pageViewportMatrix(pageSize, rotation, scale),
+    [pageSize, rotation, scale],
+  );
+  const cssW = display.width * scale;
+  const cssH = display.height * scale;
 
   // Keep the zoom percentage in the toolbar in sync with fit modes.
   useEffect(() => {
@@ -147,8 +174,6 @@ export default function PdfViewer({ pdfBytes, pdfName, onPdfLoaded }: Props) {
   const drawInk = useCallback(() => {
     const canvas = inkCanvasRef.current;
     if (!canvas) return;
-    const cssW = pageSize.width * scale;
-    const cssH = pageSize.height * scale;
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
     if (canvas.width !== Math.floor(cssW * dpr) || canvas.height !== Math.floor(cssH * dpr)) {
       canvas.width = Math.floor(cssW * dpr);
@@ -161,10 +186,10 @@ export default function PdfViewer({ pdfBytes, pdfName, onPdfLoaded }: Props) {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, cssW, cssH);
     const strokes = useStore.getState().annotations.strokesForPage(currentPage);
-    for (const stroke of strokes) drawStroke(ctx, stroke, pageSize, cssW, cssH);
+    for (const stroke of strokes) drawStroke(ctx, stroke, matrix, scale);
     const active = drawingRef.current ?? useStore.getState().activeStroke;
-    if (active && active.page === currentPage) drawStroke(ctx, active, pageSize, cssW, cssH);
-  }, [currentPage, pageSize, scale]);
+    if (active && active.page === currentPage) drawStroke(ctx, active, matrix, scale);
+  }, [currentPage, matrix, cssW, cssH, scale]);
 
   useEffect(() => {
     drawInk();
@@ -180,8 +205,6 @@ export default function PdfViewer({ pdfBytes, pdfName, onPdfLoaded }: Props) {
       if (!canvas) return;
       const ctx = canvas.getContext('2d');
       if (!ctx) return;
-      const cssW = pageSize.width * scale;
-      const cssH = pageSize.height * scale;
       const dpr = Math.min(window.devicePixelRatio || 1, 2);
       if (canvas.width !== Math.floor(cssW * dpr)) {
         canvas.width = Math.floor(cssW * dpr);
@@ -192,7 +215,7 @@ export default function PdfViewer({ pdfBytes, pdfName, onPdfLoaded }: Props) {
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.clearRect(0, 0, cssW, cssH);
       if (!cursor) return;
-      const p = pageToCanvas({ x: cursor.x, y: cursor.y }, pageSize, cssW, cssH);
+      const p = pdfToViewport({ x: cursor.x, y: cursor.y }, matrix);
       ctx.beginPath();
       ctx.arc(p.x, p.y, cursor.kind === 'pen-down' ? 5 : 8, 0, Math.PI * 2);
       ctx.fillStyle =
@@ -204,16 +227,14 @@ export default function PdfViewer({ pdfBytes, pdfName, onPdfLoaded }: Props) {
     };
     raf = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(raf);
-  }, [pageSize, scale]);
+  }, [cssW, cssH, matrix, scale]);
 
   // ---- manual drawing (mouse / touch / stylus) ----
   const toPdfPoint = (e: React.PointerEvent<HTMLCanvasElement>) => {
     const rect = inkCanvasRef.current?.getBoundingClientRect();
     if (!rect) return null;
-    const cssW = pageSize.width * scale;
-    const cssH = pageSize.height * scale;
     return clampToPage(
-      canvasToPage(e.clientX - rect.left, e.clientY - rect.top, pageSize, cssW, cssH),
+      viewportToPdf(e.clientX - rect.left, e.clientY - rect.top, matrix),
       pageSize,
     );
   };
@@ -325,10 +346,7 @@ export default function PdfViewer({ pdfBytes, pdfName, onPdfLoaded }: Props) {
       onDragOver={(e) => e.preventDefault()}
       onDrop={onDrop}
     >
-      <div
-        className="page-stack"
-        style={{ width: pageSize.width * scale, height: pageSize.height * scale }}
-      >
+      <div className="page-stack" style={{ width: cssW, height: cssH }}>
         <canvas ref={pageCanvasRef} className="page-canvas" aria-label="PDF page" />
         <canvas
           ref={inkCanvasRef}
@@ -349,25 +367,24 @@ export default function PdfViewer({ pdfBytes, pdfName, onPdfLoaded }: Props) {
 function drawStroke(
   ctx: CanvasRenderingContext2D,
   stroke: Stroke,
-  page: PageSize,
-  cssW: number,
-  cssH: number,
+  matrix: ViewportMatrix,
+  scale: number,
 ): void {
   const pts = stroke.points;
   if (pts.length === 0) return;
   const { r, g, b } = hexToRgb(stroke.color);
   ctx.strokeStyle = `rgb(${Math.round(r * 255)}, ${Math.round(g * 255)}, ${Math.round(b * 255)})`;
-  ctx.lineWidth = Math.max(stroke.width * (cssW / page.width), 0.5);
+  ctx.lineWidth = Math.max(stroke.width * scale, 0.5);
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
   ctx.beginPath();
-  const first = pageToCanvas(pts[0]!, page, cssW, cssH);
+  const first = pdfToViewport(pts[0]!, matrix);
   ctx.moveTo(first.x, first.y);
   if (pts.length === 1) {
     ctx.lineTo(first.x + 0.5, first.y);
   } else {
     for (let i = 1; i < pts.length; i++) {
-      const p = pageToCanvas(pts[i]!, page, cssW, cssH);
+      const p = pdfToViewport(pts[i]!, matrix);
       ctx.lineTo(p.x, p.y);
     }
   }
