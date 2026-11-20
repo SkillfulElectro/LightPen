@@ -10,7 +10,7 @@ export default defineConfig({
     strictPort: true,
     host: '127.0.0.1',
     hmr: { port: 1421 },
-    watch: { ignored: ['**/src-tauri/**'] },
+    watch: { ignored: ['**/src-tauri/**', '**/coverage/**', '**/test-results/**'] },
   },
   build: {
     target: 'es2020',
