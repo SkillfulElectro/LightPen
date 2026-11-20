@@ -1,0 +1,8 @@
+{
+  "$schema": "../gen/schemas/mobile-schema.json",
+  "identifier": "mobile",
+  "description": "Mobile-only additions: pick PDFs from the system document picker and share files back.",
+  "windows": ["main"],
+  "platforms": ["android", "iOS"],
+  "permissions": ["core:default", "dialog:allow-open", "fs:allow-read-file", "fs:allow-write-file"]
+}
