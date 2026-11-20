@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { PDFDocument } from 'pdf-lib';
+import { inflateSync } from 'node:zlib';
 import { buildAnnotatedPdf, buildBlankAnnotatedPdf, strokeToSvgPath } from './pdfExport';
 import type { Stroke } from './types';
 
@@ -17,6 +18,29 @@ function stroke(overrides: Partial<Stroke> = {}): Stroke {
     createdAt: 0,
     ...overrides,
   };
+}
+
+/**
+ * pdf-lib compresses content streams, so assertions on drawing operators need
+ * the streams inflated. This keeps the tests independent of pdf-lib internals.
+ */
+function contentStreams(pdfBytes: Uint8Array): string {
+  const text = new TextDecoder('latin1').decode(pdfBytes);
+  const out: string[] = [];
+  const re = /stream\r?\n/g;
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(text))) {
+    const start = match.index + match[0].length;
+    const end = text.indexOf('endstream', start);
+    if (end < 0) break;
+    const raw = pdfBytes.slice(start, end);
+    try {
+      out.push(new TextDecoder('latin1').decode(inflateSync(raw)));
+    } catch {
+      out.push(new TextDecoder('latin1').decode(raw));
+    }
+  }
+  return out.join('\n');
 }
 
 async function blankPdf(pages: [number, number][]): Promise<Uint8Array> {
@@ -40,6 +64,24 @@ describe('strokeToSvgPath', () => {
 });
 
 describe('buildAnnotatedPdf', () => {
+  it('strokes the path instead of filling it, so handwriting stays a line', async () => {
+    const original = await blankPdf([[612, 792]]);
+    const out = await buildAnnotatedPdf(original, [stroke()]);
+    const text = contentStreams(out);
+    // pdf-lib's SVG path helper emits `B` (fill + stroke) when a fill colour is
+    // set and `S` (stroke only) otherwise. We must never fill.
+    expect(text).toContain('100 92 m');
+    expect(text).toMatch(/\bl\s*\nS/);
+  });
+
+  it('anchors the path at the page height so ink lands where it was drawn', async () => {
+    const original = await blankPdf([[612, 792]]);
+    const out = await buildAnnotatedPdf(original, [stroke()]);
+    const text = contentStreams(out);
+    // translate(0, pageHeight) followed by pdf-lib's own y flip.
+    expect(text).toContain('1 0 0 1 0 792 cm');
+  });
+
   it('produces a valid PDF containing every original page', async () => {
     const original = await blankPdf([
       [612, 792],

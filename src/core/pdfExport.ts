@@ -4,14 +4,18 @@
  * Pure logic (Uint8Array in → Uint8Array out), no DOM.
  */
 
-import { PDFDocument, rgb } from 'pdf-lib';
+import { LineCapStyle, PDFDocument, rgb } from 'pdf-lib';
 import { hexToRgb } from './annotations';
 import type { PageSize, Stroke } from './types';
 
 /**
  * Convert a stroke (PDF points, bottom-left origin) into an SVG path string
- * for pdf-lib, whose `drawSvgPath` uses a top-left origin (y grows downwards).
- * `pageHeight` is the destination page height in PDF points.
+ * for pdf-lib.
+ *
+ * pdf-lib's `drawSvgPath` flips the y axis itself (`scale(1, -1)`) and anchors
+ * the origin at the `y` option, so the caller must pass `y = pageHeight` and
+ * express the path top-down. That combination maps SVG y back onto native PDF
+ * y, which is verified by rendering the export in an independent viewer.
  */
 export function strokeToSvgPath(stroke: Stroke, pageHeight: number): string {
   const pts = stroke.points;
@@ -44,11 +48,15 @@ export async function buildAnnotatedPdf(
     if (!page) continue;
     const pageHeight = page.getHeight();
     const { r, g, b } = hexToRgb(stroke.color);
+    // Stroke only (no `color`): passing a fill colour would close and fill the
+    // polyline, turning handwriting into a polygon.
     page.drawSvgPath(strokeToSvgPath(stroke, pageHeight), {
-      color: rgb(r, g, b),
+      x: 0,
+      y: pageHeight,
       borderColor: rgb(r, g, b),
       borderWidth: Math.max(stroke.width, 0.5),
-      opacity: 1,
+      borderOpacity: 1,
+      borderLineCap: LineCapStyle.Round,
     });
   }
   return doc.save();
@@ -70,9 +78,11 @@ export async function buildBlankAnnotatedPdf(
     if (!page) continue;
     const { r, g, b } = hexToRgb(stroke.color);
     page.drawSvgPath(strokeToSvgPath(stroke, page.getHeight()), {
-      color: rgb(r, g, b),
+      x: 0,
+      y: page.getHeight(),
       borderColor: rgb(r, g, b),
       borderWidth: Math.max(stroke.width, 0.5),
+      borderLineCap: LineCapStyle.Round,
     });
   }
   return doc.save();

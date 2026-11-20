@@ -103,8 +103,27 @@ different folders share annotations. Acceptable for v1, and documented.
 compared to rasterising the ink. The result is a normal PDF that opens in any
 viewer.
 
-**Limitation.** `borderWidth`/`color` strokes are drawn as filled-and-stroked
-paths, so a single-point stroke gets a 0.01 pt nudge to remain visible.
+**Two pitfalls that were found by rendering the export in an independent viewer
+(pypdfium2) and are now covered by tests:**
+
+1. `drawSvgPath` flips the y axis itself (`scale(1, -1)`), so the path must be
+   expressed top-down **and** the draw call must anchor at `y = pageHeight`.
+   Without the anchor the ink lands at `pageHeight - py`.
+2. Passing `color` (a fill colour) makes pdf-lib emit `B` (fill **and** stroke),
+   which closes the polyline and turns handwriting into a polygon. Only
+   `borderColor` + `borderWidth` are passed, so the operator is `S` (stroke).
+
+## ADR-016 — "Open with" is size-capped, dialog is not
+
+**Decision.** Files handed over by the OS (double-click, Finder, CLI argument)
+are read in Rust with a 32 MB cap and a `.pdf` extension check; the file dialog
+path is not capped (it streams through the fs plugin and pdf.js validates it,
+with a 200 MB overall limit).
+
+**Why.** Reading an arbitrary path from a shell argument is the riskiest input the
+app has. The cap keeps a malicious or accidental huge file from exhausting memory
+before pdf.js can report a clean error, while normal documents open fine through
+the dialog.
 
 ## ADR-010 — MediaPipe WASM and model bundled locally
 
