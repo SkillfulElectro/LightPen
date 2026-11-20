@@ -26,6 +26,7 @@
     "check:versions": "node scripts/check-versions.mjs",
     "fetch:model": "node scripts/fetch-model.mjs",
     "make:sample": "node scripts/make-sample-pdf.mjs",
+    "android:permissions": "node scripts/patch-android-permissions.mjs",
     "postinstall": "node scripts/copy-wasm.mjs"
   },
   "dependencies": {

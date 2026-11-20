@@ -148,7 +148,7 @@ jobs:
           - name: macos-universal
             os: macos-latest
             target: universal-apple-darwin
-            args: '--target universal-apple-darwin'
+            args: ''
           - name: linux-x64
             os: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
@@ -206,8 +206,9 @@ jobs:
           WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
         with:
           releaseId: ${{ env.RELEASE_ID }}
+          # A single --target: the matrix already carries it (a universal macOS
+          # build is expressed as the universal-apple-darwin pseudo-target).
           args: ${{ matrix.args }} --target ${{ matrix.target }}
-          includeDebug: false
 
       - name: Normalise artifact names
         if: matrix.os != 'windows-latest'
@@ -344,6 +345,12 @@ jobs:
 
       - name: Initialise Android project
         run: npm run tauri android init --ci
+
+      - name: Grant the WebView camera permission
+        # A WebView refuses getUserMedia() unless the activity grants the
+        # PermissionRequest; appends the manifest entries and the MainActivity
+        # override to the freshly generated project.
+        run: npm run android:permissions
 
       - name: Build APK + AAB
         run: |

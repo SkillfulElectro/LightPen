@@ -12,7 +12,7 @@ development environment.
 | Formatting              | `npx prettier --check .`                                     | ✅ clean                                                                          |
 | Lint (zero warnings)    | `npx eslint . --max-warnings 0`                              | ✅ clean                                                                          |
 | TypeScript strict       | `npx tsc --noEmit`                                           | ✅ clean                                                                          |
-| Unit tests              | `npx vitest run`                                             | ✅ 144 tests in 18 files                                                          |
+| Unit tests              | `npx vitest run`                                             | ✅ 151 tests in 19 files                                                          |
 | Core coverage           | `npx vitest run --coverage`                                  | ✅ 99.2 % statements, 95.5 % branches, 96.8 % functions (threshold 80 %)          |
 | Web production build    | `npm run build`                                              | ✅ pdf.js/MediaPipe split into their own chunks                                   |
 | Workflow syntax         | `actionlint` (WASM) on `ci.yml` + `release.yml`              | ✅ both OK                                                                        |

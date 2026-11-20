@@ -33,7 +33,7 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["msi", "nsis", "dmg", "app", "deb", "rpm", "appimage", "apk"],
+    "targets": ["deb", "rpm", "appimage", "msi", "nsis", "app", "dmg"],
     "createUpdaterArtifacts": false,
     "publisher": "ElectroMutex",
     "copyright": "MIT \u00a9 ElectroMutex",
