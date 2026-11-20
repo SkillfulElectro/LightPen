@@ -121,3 +121,29 @@ export function frameBrightness(
 export function isLowLight(brightness: number): boolean {
   return brightness < 0.12;
 }
+
+/**
+ * Rotate a PDF-space point around the page centre.
+ * `rotation` is in degrees, matching the page rotation reported by pdf.js.
+ * Kept in `core` because it is pure geometry, independent of rendering.
+ */
+export function rotatePagePoint(
+  point: PdfPoint,
+  page: PageSize,
+  rotation: 0 | 90 | 180 | 270,
+): PdfPoint {
+  const cx = page.width / 2;
+  const cy = page.height / 2;
+  const dx = point.x - cx;
+  const dy = point.y - cy;
+  switch (rotation) {
+    case 90:
+      return { x: cx - dy, y: cy + dx };
+    case 180:
+      return { x: cx - dx, y: cy - dy };
+    case 270:
+      return { x: cx + dy, y: cy - dx };
+    default:
+      return { x: point.x, y: point.y };
+  }
+}

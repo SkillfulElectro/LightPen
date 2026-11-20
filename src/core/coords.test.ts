@@ -6,6 +6,7 @@ import {
   frameBrightness,
   isLowLight,
   pageToCanvas,
+  rotatePagePoint,
   trackingHint,
 } from './coords';
 
@@ -103,5 +104,24 @@ describe('lighting heuristics', () => {
 
   it('returns 1 (not dark) for a degenerate frame', () => {
     expect(frameBrightness(() => [0, 0, 0], 0, 0)).toBe(1);
+  });
+});
+
+describe('rotatePagePoint', () => {
+  const page = { width: 100, height: 100 };
+
+  it('leaves points untouched at 0 degrees', () => {
+    expect(rotatePagePoint({ x: 10, y: 20 }, page, 0)).toEqual({ x: 10, y: 20 });
+  });
+
+  it('rotates 90/180/270 around the page centre', () => {
+    const p = { x: 75, y: 50 }; // right of centre
+    const r90 = rotatePagePoint(p, page, 90);
+    expect(r90.x).toBeCloseTo(50);
+    expect(r90.y).toBeCloseTo(75);
+    expect(rotatePagePoint(p, page, 180)).toEqual({ x: 25, y: 50 });
+    const r270 = rotatePagePoint(p, page, 270);
+    expect(r270.x).toBeCloseTo(50);
+    expect(r270.y).toBeCloseTo(25);
   });
 });
