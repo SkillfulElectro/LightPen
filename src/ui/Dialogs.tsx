@@ -3,6 +3,7 @@
 import { useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useStore } from '../store/useStore';
+import { PauseIllustration } from './illustrations';
 import { startTracking } from './trackingHandle';
 
 function Modal({
@@ -187,6 +188,7 @@ export function CheatSheet() {
   if (!open) return null;
   return (
     <Modal title={t('toolbar.cheatSheet')} onClose={() => setOpen(false)}>
+      <PauseIllustration label={t('gestures.pauseArt')} />
       <ul className="cheat-list">
         <li>✌️ {t('gestures.penDown')}</li>
         <li>👉 {t('gestures.hover')}</li>

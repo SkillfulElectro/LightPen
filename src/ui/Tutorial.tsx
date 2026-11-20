@@ -8,6 +8,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useStore } from '../store/useStore';
+import { DistanceIllustration, PlacementIllustration } from './illustrations';
 import { startTracking } from './trackingHandle';
 
 type Exercise = 'hover' | 'write' | 'erase' | 'swipe' | 'pause';
@@ -195,7 +196,18 @@ export default function Tutorial() {
               </button>
             </>
           )}
-          {step === 2 && <p>{t('tutorial.placement')}</p>}
+          {step === 2 && (
+            <>
+              <p>{t('tutorial.placement')}</p>
+              <PlacementIllustration label={t('tutorial.placementArt')} />
+              <ul className="art-captions">
+                <li className="ok">✓ {t('tutorial.placementGood')}</li>
+                <li className="bad">✕ {t('tutorial.placementBad')}</li>
+              </ul>
+              <DistanceIllustration label={t('tutorial.placementDistanceArt')} />
+              <p className="art-caption">{t('tutorial.placementDistance')}</p>
+            </>
+          )}
           {step === 3 && (
             <>
               <p>{t('tutorial.calibration')}</p>

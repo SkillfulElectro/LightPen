@@ -58,7 +58,8 @@
     "hover": "Point with index finger to move the cursor",
     "erase": "Open palm to erase",
     "swipe": "Swipe sideways with open palm for next/previous page",
-    "pause": "Hold a fist for 1 second to pause tracking"
+    "pause": "Hold a fist for 1 second to pause tracking",
+    "pauseArt": "A closed fist, an arrow to a clock, and a pause symbol: holding a fist for one second pauses tracking."
   },
   "tutorial": {
     "title": "Welcome to LightPen",
@@ -71,6 +72,11 @@
     "privacy": "Your camera video never leaves this device. No recording, no uploads, no tracking.",
     "permission": "First, allow camera access so LightPen can see your hand.",
     "placement": "Place your camera at eye level, about an arm's length away, in good light. Keep your hand inside the frame.",
+    "placementGood": "Good: camera at eye level",
+    "placementBad": "Avoid: camera below your hand",
+    "placementDistance": "About one arm's length from the camera.",
+    "placementArt": "Two camera setups: a camera level with your eyes, and a camera below your raised hand, which is harder to track.",
+    "placementDistanceArt": "A camera on the left, a dashed line to a person on the right, showing an arm's length of distance.",
     "calibration": "Drag a box over the area where you will move your hand — that box becomes the page.",
     "calibrationHint": "Comfort is more important than size: pick a box you can reach without stretching. You can redo this later from the tutorial.",
     "practice": "Practice: {{exercise}}",
