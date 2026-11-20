@@ -218,11 +218,12 @@ export default function PdfViewer({ pdfBytes, pdfName, onPdfLoaded }: Props) {
       const p = pdfToViewport({ x: cursor.x, y: cursor.y }, matrix);
       ctx.beginPath();
       ctx.arc(p.x, p.y, cursor.kind === 'pen-down' ? 5 : 8, 0, Math.PI * 2);
+      // White halo + saturated fill: legible on both light and dark page content.
       ctx.fillStyle =
-        cursor.kind === 'pen-down' ? '#e11d48' : cursor.kind === 'erase' ? '#f59e0b' : '#3b82f6';
+        cursor.kind === 'pen-down' ? '#be123c' : cursor.kind === 'erase' ? '#b45309' : '#1d4ed8';
       ctx.fill();
       ctx.lineWidth = 2;
-      ctx.strokeStyle = '#fff';
+      ctx.strokeStyle = '#ffffff';
       ctx.stroke();
     };
     raf = requestAnimationFrame(loop);

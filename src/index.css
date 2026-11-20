@@ -5,12 +5,16 @@
   --bg-secondary: #f3f4f6;
   --text: #111827;
   --text-secondary: #4b5563;
-  --border: #d1d5db;
-  --accent: #e11d48;
+  /* WCAG 2.2 AA: borders are non-text UI components and need 3:1 against the
+     surface they sit on; the accent is used for text and buttons and needs 4.5:1
+     on both --bg and --bg-secondary. Verified in src/ui/theme.test.ts. */
+  --border: #7c8494;
+  --accent: #be123c;
   --accent-text: #ffffff;
   --focus: #2563eb;
   --error: #b91c1c;
   --success: #15803d;
+  --warning: #92400e;
 }
 
 [data-theme='dark'] {
@@ -18,12 +22,13 @@
   --bg-secondary: #1f2937;
   --text: #f9fafb;
   --text-secondary: #d1d5db;
-  --border: #4b5563;
+  --border: #6b7280;
   --accent: #fb7185;
   --accent-text: #111827;
   --focus: #93c5fd;
   --error: #fca5a5;
   --success: #86efac;
+  --warning: #fbbf24;
 }
 
 * {
@@ -299,7 +304,7 @@ label.check {
 }
 
 .camera-hint {
-  color: #b45309;
+  color: var(--warning);
   font-size: 0.9rem;
 }
 
