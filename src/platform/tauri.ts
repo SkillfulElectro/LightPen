@@ -68,6 +68,16 @@ function sidecarKey(pdfName: string): string {
   return `lightpen:sidecar:${pdfName}`;
 }
 
+/** File-system-safe sidecar name: `<name>.lightpen.json` with unsafe chars replaced. */
+export function sidecarFileName(pdfName: string): string {
+  const unsafeChars = new Set(['/', '\\', ':', '*', '?', '"', '<', '>', '|']);
+  const safe = Array.from(pdfName)
+    .filter((ch) => !unsafeChars.has(ch) && ch.charCodeAt(0) >= 32)
+    .join('')
+    .slice(0, 120);
+  return `${safe || 'document'}.lightpen.json`;
+}
+
 /** Load the annotation sidecar for a PDF (app data dir in Tauri, localStorage on web). */
 export async function loadSidecar(pdfName: string): Promise<SidecarData | null> {
   if (isTauri()) {
@@ -75,7 +85,8 @@ export async function loadSidecar(pdfName: string): Promise<SidecarData | null> 
       const { appDataDir, join } = await import('@tauri-apps/api/path');
       const { readTextFile } = await import('@tauri-apps/plugin-fs');
       const dir = await appDataDir();
-      const text = await readTextFile(await join(dir, `${pdfName}.lightpen.json`));
+      // Note: only paths inside $APPDATA/** are allowed by the capability scope.
+      const text = await readTextFile(await join(dir, sidecarFileName(pdfName)));
       return JSON.parse(text) as SidecarData;
     } catch {
       return null;
@@ -97,7 +108,7 @@ export async function saveSidecar(pdfName: string, data: SidecarData): Promise<v
       const { writeTextFile, mkdir } = await import('@tauri-apps/plugin-fs');
       const dir = await appDataDir();
       await mkdir(dir, { recursive: true });
-      await writeTextFile(await join(dir, `${pdfName}.lightpen.json`), JSON.stringify(data));
+      await writeTextFile(await join(dir, sidecarFileName(pdfName)), JSON.stringify(data));
     } catch {
       // Autosave must never break drawing; ignore write failures.
     }
