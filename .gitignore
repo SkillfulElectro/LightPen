@@ -25,3 +25,6 @@ android-keystore.properties
 dist-android/
 dist-ios/
 renamed/
+
+# TypeScript incremental build info
+*.tsbuildinfo
