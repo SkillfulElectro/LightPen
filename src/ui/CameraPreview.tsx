@@ -21,6 +21,7 @@ import { GestureClassifier } from '../core/gesture';
 import { OneEuroPoint } from '../core/oneEuro';
 import type { PageSize, Stroke } from '../core/types';
 import {
+  CAMERA_ERROR_MESSAGE_KEY,
   CameraError,
   listCameras,
   runFrameLoop,
@@ -225,8 +226,7 @@ export default function CameraPreview({ pageSize, onGesture }: Props) {
       stopLoopRef.current = stopLoop;
       setTracking({ active: true });
     } catch (err) {
-      if (err instanceof CameraError)
-        setError(t(`camera.${err.kind === 'unknown' ? 'unsupported' : err.kind}`));
+      if (err instanceof CameraError) setError(t(CAMERA_ERROR_MESSAGE_KEY[err.kind]));
       else setError(t('camera.unsupported'));
       stop();
     }

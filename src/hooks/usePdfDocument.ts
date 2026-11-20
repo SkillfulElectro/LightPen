@@ -12,6 +12,15 @@ pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
 
 export type PdfErrorKind = 'encrypted' | 'corrupt' | 'too-large' | 'unknown';
 
+/** i18n key (under `viewer.`) for each error kind. Explicit, so a rename of one
+ * side cannot silently fall back to showing the raw key to the user. */
+export const PDF_ERROR_MESSAGE_KEY: Record<PdfErrorKind, string> = {
+  encrypted: 'viewer.encrypted',
+  corrupt: 'viewer.corrupt',
+  'too-large': 'viewer.tooLarge',
+  unknown: 'viewer.unknown',
+};
+
 const MAX_BYTES = 200 * 1024 * 1024; // 200 MB
 
 export interface LoadedPdf {

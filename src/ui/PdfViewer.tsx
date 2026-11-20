@@ -20,6 +20,7 @@ import type { PageSize, Stroke } from '../core/types';
 import {
   classifyPdfError,
   getPageGeometry,
+  PDF_ERROR_MESSAGE_KEY,
   loadPdf,
   usePageRenderer,
   type PageGeometry,
@@ -312,7 +313,7 @@ export default function PdfViewer({ pdfBytes, pdfName, onPdfLoaded }: Props) {
   if (error) {
     return (
       <div className="viewer-error" role="alert">
-        <p>{t(`viewer.${error}`)}</p>
+        <p>{t(PDF_ERROR_MESSAGE_KEY[error])}</p>
         <button type="button" onClick={() => void openViaDialog()}>
           {t('toolbar.open')}
         </button>

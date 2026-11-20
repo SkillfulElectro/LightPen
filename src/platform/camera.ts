@@ -4,6 +4,15 @@
 
 export type CameraErrorKind = 'denied' | 'not-found' | 'in-use' | 'unsupported' | 'unknown';
 
+/** i18n key for each camera failure, so the UI never shows a raw key. */
+export const CAMERA_ERROR_MESSAGE_KEY: Record<CameraErrorKind, string> = {
+  denied: 'camera.denied',
+  'not-found': 'camera.notFound',
+  'in-use': 'camera.inUse',
+  unsupported: 'camera.unsupported',
+  unknown: 'camera.unsupported',
+};
+
 export class CameraError extends Error {
   constructor(
     public readonly kind: CameraErrorKind,
