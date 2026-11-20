@@ -39,6 +39,8 @@ interface AppState {
   setCurrentPage: (page: number) => void;
   zoom: number;
   setZoom: (zoom: number) => void;
+  /** Update the displayed zoom without leaving the current fit mode. */
+  setFitScale: (zoom: number) => void;
   fitMode: FitMode;
   setFitMode: (mode: FitMode) => void;
 
@@ -118,6 +120,7 @@ export const useStore = create<AppState>((set, get) => ({
   },
   zoom: 1,
   setZoom: (zoom) => set({ zoom: Math.min(4, Math.max(0.25, zoom)), fitMode: 'manual' }),
+  setFitScale: (zoom) => set({ zoom: Math.min(4, Math.max(0.25, zoom)) }),
   fitMode: 'fit-width',
   setFitMode: (mode) => set({ fitMode: mode }),
 

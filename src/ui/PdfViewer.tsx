@@ -36,6 +36,7 @@ export default function PdfViewer({ pdfBytes, pdfName, onPdfLoaded }: Props) {
   const [error, setError] = useState<PdfErrorKind | null>(null);
   const [pageSizes, setPageSizes] = useState<PageSize[]>([]);
   const [containerWidth, setContainerWidth] = useState(800);
+  const [containerHeight, setContainerHeight] = useState(700);
   const [dragOver, setDragOver] = useState(false);
   const drawingRef = useRef<Stroke | null>(null);
 
@@ -85,8 +86,9 @@ export default function PdfViewer({ pdfBytes, pdfName, onPdfLoaded }: Props) {
     const el = containerRef.current;
     if (!el) return;
     const ro = new ResizeObserver((entries) => {
-      const w = entries[0]?.contentRect.width;
-      if (w) setContainerWidth(w);
+      const rect = entries[0]?.contentRect;
+      if (rect?.width) setContainerWidth(rect.width);
+      if (rect?.height) setContainerHeight(rect.height);
     });
     ro.observe(el);
     return () => ro.disconnect();
@@ -120,8 +122,20 @@ export default function PdfViewer({ pdfBytes, pdfName, onPdfLoaded }: Props) {
     fitMode === 'fit-width'
       ? Math.max((containerWidth - 32) / pageSize.width, 0.1)
       : fitMode === 'fit-page'
-        ? Math.max(Math.min((containerWidth - 32) / pageSize.width, 700 / pageSize.height), 0.1)
+        ? Math.max(
+            Math.min(
+              (containerWidth - 32) / pageSize.width,
+              (containerHeight - 32) / pageSize.height,
+            ),
+            0.1,
+          )
         : zoom;
+
+  // Keep the zoom percentage in the toolbar in sync with fit modes.
+  useEffect(() => {
+    if (fitMode === 'manual') return;
+    if (Math.abs(useStore.getState().zoom - scale) > 0.01) useStore.getState().setFitScale(scale);
+  }, [scale, fitMode]);
 
   // ---- render page + ink whenever inputs change ----
   useEffect(() => {
