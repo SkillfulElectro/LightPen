@@ -12,15 +12,15 @@ development environment.
 | Formatting              | `npx prettier --check .`                                     | ✅ clean                                                                          |
 | Lint (zero warnings)    | `npx eslint . --max-warnings 0`                              | ✅ clean                                                                          |
 | TypeScript strict       | `npx tsc --noEmit`                                           | ✅ clean                                                                          |
-| Unit tests              | `npx vitest run`                                             | ✅ 83 tests in 11 files                                                           |
-| Core coverage           | `npx vitest run --coverage`                                  | ✅ 99.1 % statements, 95.4 % branches, 96.5 % functions (threshold 80 %)          |
+| Unit tests              | `npx vitest run`                                             | ✅ 140 tests in 17 files                                                          |
+| Core coverage           | `npx vitest run --coverage`                                  | ✅ 99.2 % statements, 95.5 % branches, 96.8 % functions (threshold 80 %)          |
 | Web production build    | `npm run build`                                              | ✅ pdf.js/MediaPipe split into their own chunks                                   |
 | Workflow syntax         | `actionlint` (v1.7.7) on `ci.yml` + `release.yml`            | ✅ both OK                                                                        |
 | Annotated PDF export    | exported sample rendered with pypdfium2, parsed with pypdf   | ✅ ink present, correctly placed, stroked (not filled)                            |
 | Rotated-page mapping    | matrices compared with pdf.js `getViewport` for 0/90/180/270 | ✅ exact to 5 decimals; exports rendered correctly                                |
 | App renders in jsdom    | `src/ui/app.smoke.test.tsx`, `src/ui/a11y.test.tsx`          | ✅ toolbar, viewer, dialogs, tutorial sandbox, keyboard shortcuts, focus handling |
 
-Two real defects were found and fixed by these checks rather than by reading code:
+Three real defects were found and fixed by these checks rather than by reading code:
 
 1. **Export placement** — pdf-lib's `drawSvgPath` flips y itself, so paths needed
    `y = pageHeight`; without it ink appeared at `pageHeight − py`. Passing a fill
@@ -28,6 +28,11 @@ Two real defects were found and fixed by these checks rather than by reading cod
    filled polygon.
 2. **Infinite render loop** — a Zustand selector returned a fresh page-size object
    on every store read (`Maximum update depth exceeded`).
+3. **Cross-document ink leak** — sidecars were keyed by file name, so
+   `report.pdf` in two folders shared annotations; now keyed by content
+   (ADR-020). The fix also exposed a starvation bug: continuous drawing kept
+   restarting the 800 ms autosave debounce, so a crash could lose a whole
+   session's ink. The writer now has a hard 5 s deadline.
 
 ## 2. Not verified (environment limits)
 
@@ -63,8 +68,10 @@ Two real defects were found and fixed by these checks rather than by reading cod
    network, place the file manually (see RELEASING.md → Model download).
 3. **Release dry run**: run `release.yml` with `draft=true`,
    `build_android=false`, `build_ios=false` first, then add signing secrets.
-4. **Sidecar identity**: annotations are keyed by file name only, so two PDFs with
-   the same name in different folders share a sidecar (ADR-008).
+4. ~~**Sidecar identity**: annotations are keyed by file name only, so two PDFs
+   with the same name in different folders share a sidecar.~~ **Fixed** — sidecars
+   are now keyed by document content (ADR-020, `src/core/docIdentity.ts`). Note
+   that pre-existing name-keyed sidecars are not migrated; see the ADR.
 5. **Camera resolution on mobile**: `facingMode: 'user'` with a 1280×720 ideal is
    used for the default device; verify the front camera produces a usable frame
    on low-end Android devices and adjust `adaptiveSkip` if needed.

@@ -211,3 +211,24 @@ test('sidecar autosave restores ink when the same PDF is reopened', async ({ pag
   });
   expect(inked).toBe(true);
 });
+
+test('ink follows the document content, not its file name (ADR-020)', async ({ page }) => {
+  await openSample(page);
+  const ink = page.locator('.ink-canvas');
+  const box = await ink.boundingBox();
+  if (!box) throw new Error('ink canvas not visible');
+  await page.mouse.move(box.x + 80, box.y + 120);
+  await page.mouse.down();
+  await page.mouse.move(box.x + 220, box.y + 180, { steps: 6 });
+  await page.mouse.up();
+  await page.waitForTimeout(1200);
+  await expect(page.getByRole('button', { name: 'Undo' })).toBeEnabled();
+
+  // Reopening the same bytes under another name must keep the ink.
+  await page.evaluate(async () => {
+    const res = await fetch('sample.pdf');
+    const bytes = new Uint8Array(await res.arrayBuffer());
+    window.dispatchEvent(new CustomEvent('lightpen:file', { detail: { name: 'copy.pdf', bytes } }));
+  });
+  await expect(page.getByRole('button', { name: 'Undo' })).toBeEnabled();
+});

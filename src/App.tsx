@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { contentKey } from './core/docIdentity';
 import { buildAnnotatedPdf } from './core/pdfExport';
-import { useStore, tutorialSeen } from './store/useStore';
+import { flushAutosave, useStore, tutorialSeen } from './store/useStore';
 import { isTauri, restoreWindowSize, saveBytesAs, saveWindowSize } from './platform/tauri';
 import CameraPreview from './ui/CameraPreview';
 import { CheatSheet, PermissionDialog, SettingsDialog, ShortcutsHelp } from './ui/Dialogs';
@@ -19,6 +20,18 @@ export default function App() {
   const setCheatSheetOpen = useStore((s) => s.setCheatSheetOpen);
   const noteGesture = useStore((s) => s.noteGesture);
   const currentPage = useStore((s) => s.currentPage);
+
+  // Never lose the last strokes: write a pending sidecar before the page goes
+  // away (close, reload, navigation) instead of waiting out the debounce.
+  useEffect(() => {
+    const flush = () => void flushAutosave();
+    window.addEventListener('pagehide', flush);
+    window.addEventListener('beforeunload', flush);
+    return () => {
+      window.removeEventListener('pagehide', flush);
+      window.removeEventListener('beforeunload', flush);
+    };
+  }, []);
 
   // First-run tutorial.
   useEffect(() => {
@@ -109,8 +122,9 @@ export default function App() {
       bytes: Uint8Array,
       pageCount: number,
       pageSizes: { width: number; height: number }[],
+      key: string,
     ) => {
-      setPdf({ name, bytes, pageCount, pageSizes });
+      setPdf({ name, bytes, pageCount, pageSizes, key: key || contentKey(bytes) });
     },
     [setPdf],
   );
@@ -131,6 +145,8 @@ export default function App() {
     const state = useStore.getState();
     const doc = state.pdf;
     if (!doc) return;
+    // Exporting reads the live annotations; keep the sidecar in step with them.
+    await flushAutosave();
     const bytes = await buildAnnotatedPdf(doc.bytes, state.annotations.all);
     const out = doc.name.replace(/\.pdf$/i, '') + '.annotated.pdf';
     await saveBytesAs(out, bytes);

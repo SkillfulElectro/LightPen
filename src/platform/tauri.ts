@@ -4,6 +4,7 @@
  * browser APIs so the app is fully usable without Tauri.
  */
 
+import { sidecarFileName } from '../core/docIdentity';
 import type { SidecarData } from '../core/types';
 
 export function isTauri(): boolean {
@@ -64,36 +65,27 @@ export async function saveBytesAs(defaultName: string, bytes: Uint8Array): Promi
   return true;
 }
 
-function sidecarKey(pdfName: string): string {
-  return `lightpen:sidecar:${pdfName}`;
+/** localStorage key for a document sidecar (web build). */
+function sidecarKey(key: string): string {
+  return `lightpen:sidecar:${key}`;
 }
 
-/** File-system-safe sidecar name: `<name>.lightpen.json` with unsafe chars replaced. */
-export function sidecarFileName(pdfName: string): string {
-  const unsafeChars = new Set(['/', '\\', ':', '*', '?', '"', '<', '>', '|']);
-  const safe = Array.from(pdfName)
-    .filter((ch) => !unsafeChars.has(ch) && ch.charCodeAt(0) >= 32)
-    .join('')
-    .slice(0, 120);
-  return `${safe || 'document'}.lightpen.json`;
-}
-
-/** Load the annotation sidecar for a PDF (app data dir in Tauri, localStorage on web). */
-export async function loadSidecar(pdfName: string): Promise<SidecarData | null> {
+/** Load the annotation sidecar for a document (app data dir in Tauri, localStorage on web). */
+export async function loadSidecar(key: string): Promise<SidecarData | null> {
   if (isTauri()) {
     try {
       const { appDataDir, join } = await import('@tauri-apps/api/path');
       const { readTextFile } = await import('@tauri-apps/plugin-fs');
       const dir = await appDataDir();
       // Note: only paths inside $APPDATA/** are allowed by the capability scope.
-      const text = await readTextFile(await join(dir, sidecarFileName(pdfName)));
+      const text = await readTextFile(await join(dir, sidecarFileName(key)));
       return JSON.parse(text) as SidecarData;
     } catch {
       return null;
     }
   }
   try {
-    const raw = localStorage.getItem(sidecarKey(pdfName));
+    const raw = localStorage.getItem(sidecarKey(key));
     return raw ? (JSON.parse(raw) as SidecarData) : null;
   } catch {
     return null;
@@ -101,21 +93,21 @@ export async function loadSidecar(pdfName: string): Promise<SidecarData | null> 
 }
 
 /** Save the annotation sidecar. */
-export async function saveSidecar(pdfName: string, data: SidecarData): Promise<void> {
+export async function saveSidecar(key: string, data: SidecarData): Promise<void> {
   if (isTauri()) {
     try {
       const { appDataDir, join } = await import('@tauri-apps/api/path');
       const { writeTextFile, mkdir } = await import('@tauri-apps/plugin-fs');
       const dir = await appDataDir();
       await mkdir(dir, { recursive: true });
-      await writeTextFile(await join(dir, sidecarFileName(pdfName)), JSON.stringify(data));
+      await writeTextFile(await join(dir, sidecarFileName(key)), JSON.stringify(data));
     } catch {
       // Autosave must never break drawing; ignore write failures.
     }
     return;
   }
   try {
-    localStorage.setItem(sidecarKey(pdfName), JSON.stringify(data));
+    localStorage.setItem(sidecarKey(key), JSON.stringify(data));
   } catch {
     // Storage full / private mode — ignore.
   }

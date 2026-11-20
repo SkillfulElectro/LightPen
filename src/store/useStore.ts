@@ -9,7 +9,8 @@ import { AnnotationStore } from '../core/annotations';
 import { sanitizeSettings } from '../core/settings';
 import type { PageSize, Settings, Stroke } from '../core/types';
 import { DEFAULT_SETTINGS } from '../core/types';
-import { loadSidecar, saveSidecar } from '../platform/tauri';
+import { saveSidecar } from '../platform/tauri';
+import { createSidecarWriter, restoreAnnotations as restoreFromSidecar } from './sidecar';
 
 export type Tool = 'pen' | 'eraser';
 export type FitMode = 'fit-width' | 'fit-page' | 'manual';
@@ -19,6 +20,8 @@ export interface PdfDoc {
   bytes: Uint8Array;
   pageCount: number;
   pageSizes: PageSize[];
+  /** Content key (see core/docIdentity) that keeps same-named files apart. */
+  key: string;
 }
 
 export interface TrackingState {
@@ -86,7 +89,6 @@ interface AppState {
   /** Hot-path refs (no re-renders). */
   handCursor: { x: number; y: number; kind: string } | null;
   activeStroke: Stroke | null;
-  autosaveTimer: ReturnType<typeof setTimeout> | null;
 }
 
 const SETTINGS_KEY = 'lightpen:settings';
@@ -240,29 +242,34 @@ export const useStore = create<AppState>((set, get) => ({
 
   handCursor: null,
   activeStroke: null,
-  autosaveTimer: null,
 }));
 
+/** Autosave writer shared by every mutation that changes annotations. */
+const autosave = createSidecarWriter(800, saveSidecar);
+
 function scheduleAutosave(get: () => AppState): void {
-  const state = get();
-  if (state.autosaveTimer) clearTimeout(state.autosaveTimer);
-  const timer = setTimeout(() => {
-    const s = get();
-    if (s.pdf) void saveSidecar(s.pdf.name, s.annotations.serialize());
-  }, 800);
-  useStore.setState({ autosaveTimer: timer });
+  const { pdf, annotations } = get();
+  if (!pdf) return;
+  // Capture the key and serializer, not a live store read: a save that lands
+  // after the document changed must not write old ink under the new key.
+  const store = annotations;
+  autosave.schedule({ key: pdf.key, serialize: () => store.serialize() });
 }
 
-/** Restore annotations for a freshly opened PDF. */
-export async function restoreAnnotations(pdfName: string): Promise<void> {
-  const data = await loadSidecar(pdfName);
-  const store = data ? AnnotationStore.deserialize(data) : new AnnotationStore();
+/** Restore annotations for a freshly opened PDF (keyed by content). */
+export async function restoreAnnotations(key: string): Promise<void> {
+  const store = await restoreFromSidecar(key);
   useStore.setState({
     annotations: store,
     strokesVersion: useStore.getState().strokesVersion + 1,
     canUndo: false,
     canRedo: false,
   });
+}
+
+/** Write any pending sidecar immediately (export, page hide, window close). */
+export function flushAutosave(): Promise<void> {
+  return autosave.flush();
 }
 
 export function tutorialSeen(): boolean {

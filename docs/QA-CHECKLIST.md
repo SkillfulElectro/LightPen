@@ -11,6 +11,8 @@ need a human, a real camera and real hardware. Copy this list into the release P
 - [ ] Opening a corrupt PDF and a password-protected PDF shows the friendly error, not a crash.
 - [ ] Manual drawing: pen, colour, width, eraser, undo/redo, clear page. Touch/stylus works.
 - [ ] Close and reopen the same PDF → annotations are restored from the sidecar.
+- [ ] Two differently-named copies of the same PDF share ink; two **same-named**
+      PDFs in different folders do not (ADR-020).
 - [ ] **Save annotated PDF** produces a file that opens in Acrobat/Firefox/Preview, with ink in the right place.
 - [ ] **Export page PNG** matches the visible page including ink.
 - [ ] Tutorial runs end to end (skip, back, calibration box, all five sandbox exercises, cheat sheet).

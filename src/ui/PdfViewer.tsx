@@ -27,12 +27,19 @@ import {
   type PdfErrorKind,
 } from '../hooks/usePdfDocument';
 import { restoreAnnotations, useStore } from '../store/useStore';
+import { contentKey } from '../core/docIdentity';
 import { openPdfFile } from '../platform/tauri';
 
 interface Props {
   pdfBytes: Uint8Array | null;
   pdfName: string | null;
-  onPdfLoaded: (name: string, bytes: Uint8Array, pageCount: number, pageSizes: PageSize[]) => void;
+  onPdfLoaded: (
+    name: string,
+    bytes: Uint8Array,
+    pageCount: number,
+    pageSizes: PageSize[],
+    key: string,
+  ) => void;
 }
 
 export default function PdfViewer({ pdfBytes, pdfName, onPdfLoaded }: Props) {
@@ -68,8 +75,9 @@ export default function PdfViewer({ pdfBytes, pdfName, onPdfLoaded }: Props) {
       .then(async (loaded) => {
         if (cancelled) return;
         setDoc(loaded.doc);
-        onPdfLoaded(pdfName ?? 'document.pdf', pdfBytes, loaded.pageCount, loaded.pageSizes);
-        await restoreAnnotations(pdfName ?? 'document.pdf');
+        const key = contentKey(pdfBytes);
+        onPdfLoaded(pdfName ?? 'document.pdf', pdfBytes, loaded.pageCount, loaded.pageSizes, key);
+        await restoreAnnotations(key);
         // Validate annotations against the real page count: a sidecar from a
         // different document must not create strokes on pages that do not exist.
         const store = useStore.getState().annotations;

@@ -98,8 +98,8 @@ directory 800 ms after the last change; the browser build falls back to
 **Why.** Non-destructive by default: the original PDF file is never modified. A
 crash or a closed window still restores the work.
 
-**Consequences.** Sidecars are keyed by file name; two PDFs with the same name in
-different folders share annotations. Acceptable for v1, and documented.
+**Consequences.** Originally sidecars were keyed by file name, so two PDFs with
+the same name in different folders shared annotations. Superseded by ADR-020.
 
 ## ADR-009 — Export through pdf-lib vector paths
 
@@ -216,3 +216,22 @@ exposes `setPdfJsApi` / `resolveApi`. The Vitest setup injects
 made every component test that touches a PDF fail. The legacy build parses real
 PDFs under jsdom, so tests now exercise the genuine load/render path (page count,
 page size, navigation, zoom) against `public/sample.pdf` instead of a mock.
+
+## ADR-020 — Sidecars keyed by document content, not file name
+
+**Decision.** A sidecar is named `<name>.<content-key>.lightpen.json`, where the
+content key is `size-fnv1a(bytes)` over the PDF. The web build stores the same
+pair in `lightpen:sidecar:<name>@<key>`.
+
+**Why.** ADR-008's file-name key meant `report.pdf` from two folders silently
+shared ink — a data-corruption bug, not just an inconvenience. Hashing the bytes
+makes the same file resolve to the same sidecar wherever it is opened, and two
+different files never collide even with an identical name. Hashing costs one
+linear pass over bytes that are already in memory (single-digit milliseconds for
+a 10 MB document).
+
+**Consequences.** The readable prefix is kept so the app data folder stays
+browsable; the key alone would be opaque. Annotations from builds before this
+change are not migrated, because a name-keyed sidecar cannot be attributed to one
+of several same-named documents — the safe default is to start that document
+clean rather than attach someone else's strokes.

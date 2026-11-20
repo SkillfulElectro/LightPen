@@ -61,7 +61,7 @@ camera frame ──► MediaPipe HandLandmarker (WASM, GPU/CPU)
               AnnotationStore / activeStroke
                       │                     └──► ink canvas (imperative 2D drawing)
                       ▼
-              autosave debounce (800 ms) ──► <name>.lightpen.json
+              autosave debounce (800 ms, 5 s max) ──► <content-key>.lightpen.json
 ```
 
 ### Why the ink canvas is separate from React

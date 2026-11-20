@@ -1,22 +1,26 @@
 import { describe, expect, it } from 'vitest';
-import { sidecarFileName } from './tauri';
+import { loadSidecar, saveSidecar } from './tauri';
 
-describe('sidecarFileName', () => {
-  it('appends the sidecar suffix', () => {
-    expect(sidecarFileName('report.pdf')).toBe('report.pdf.lightpen.json');
+describe('sidecar round trip (web build)', () => {
+  const data = { version: 1 as const, strokes: [], updatedAt: 1 };
+
+  it('stores per document key, so same-named files do not collide', async () => {
+    localStorage.clear();
+    await saveSidecar('2a-aaaaaaaa', { ...data, updatedAt: 111 });
+    expect((await loadSidecar('2a-aaaaaaaa'))?.updatedAt).toBe(111);
+    await expect(loadSidecar('2a-bbbbbbbb')).resolves.toBeNull();
   });
 
-  it('strips characters that are illegal in a file name', () => {
-    // The important property: no path separator survives.
-    expect(sidecarFileName('../../etc/passwd')).not.toContain('/');
-    expect(sidecarFileName('a/b:c*d?e"f<g>h|i.pdf')).toBe('abcdefghi.pdf.lightpen.json');
+  it('keeps the last write for the same document', async () => {
+    localStorage.clear();
+    await saveSidecar('k', { ...data, updatedAt: 1 });
+    await saveSidecar('k', { ...data, updatedAt: 2 });
+    expect((await loadSidecar('k'))?.updatedAt).toBe(2);
   });
 
-  it('never returns an empty base name', () => {
-    expect(sidecarFileName('')).toBe('document.lightpen.json');
-  });
-
-  it('caps the length so the path stays usable', () => {
-    expect(sidecarFileName(`${'x'.repeat(500)}.pdf`).length).toBeLessThanOrEqual(140);
+  it('returns null instead of throwing on unreadable storage', async () => {
+    localStorage.clear();
+    localStorage.setItem('lightpen:sidecar:x', 'not json');
+    await expect(loadSidecar('x')).resolves.toBeNull();
   });
 });

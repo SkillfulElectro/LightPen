@@ -216,6 +216,53 @@ describe('zoom', () => {
   });
 });
 
+describe('sidecar identity (ADR-020)', () => {
+  it('keeps ink when the file is renamed, and never shares it between documents', async () => {
+    const { useStore } = await import('../store/useStore');
+    const { buildAnnotatedPdf } = await import('../core/pdfExport');
+    const origError = console.error;
+    console.error = () => {};
+    await openSample();
+    const bytes = new Uint8Array(readFileSync('public/sample.pdf'));
+    useStore.getState().addStroke({
+      id: 'identity-test',
+      page: 0,
+      color: '#e11d48',
+      width: 2,
+      createdAt: 1,
+      points: [
+        { x: 10, y: 10 },
+        { x: 20, y: 20 },
+      ],
+    });
+    await waitFor(() => expect(useStore.getState().annotations.all).toHaveLength(1));
+    // Let the debounced autosave land.
+    await new Promise((r) => setTimeout(r, 1000));
+
+    // Same content, different name → same annotations.
+    await act(async () => {
+      window.dispatchEvent(
+        new CustomEvent('lightpen:file', { detail: { name: 'renamed.pdf', bytes } }),
+      );
+    });
+    await waitFor(() => expect(useStore.getState().annotations.all).toHaveLength(1), {
+      timeout: 5000,
+    });
+
+    // Same name, different content → a clean document.
+    const other = new Uint8Array(await buildAnnotatedPdf(bytes, []));
+    await act(async () => {
+      window.dispatchEvent(
+        new CustomEvent('lightpen:file', { detail: { name: 'renamed.pdf', bytes: other } }),
+      );
+    });
+    await waitFor(() => expect(useStore.getState().annotations.all).toHaveLength(0), {
+      timeout: 5000,
+    });
+    console.error = origError;
+  });
+});
+
 describe('mobile camera panel', () => {
   it('is collapsible and reports its expanded state', async () => {
     const { default: App } = await import('../App');
