@@ -9,6 +9,8 @@ import PdfViewer from './ui/PdfViewer';
 import Toolbar from './ui/Toolbar';
 import Tutorial from './ui/Tutorial';
 
+const DEFAULT_PAGE_SIZE = { width: 612, height: 792 } as const;
+
 export default function App() {
   const { t } = useTranslation();
   const [pdfBytes, setPdfBytes] = useState<Uint8Array | null>(null);
@@ -149,7 +151,10 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
-  const pageSize = useStore((s) => s.pdf?.pageSizes[s.currentPage] ?? { width: 612, height: 792 });
+  const pdfPageSizes = useStore((s) => s.pdf?.pageSizes);
+  // Stable reference: a selector must never return a fresh object, or Zustand
+  // re-renders on every store update (infinite loop).
+  const pageSize = pdfPageSizes?.[currentPage] ?? DEFAULT_PAGE_SIZE;
 
   return (
     <div className="app">

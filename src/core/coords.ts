@@ -60,8 +60,11 @@ export function canvasToPage(
   canvasW: number,
   canvasH: number,
 ): PdfPoint {
-  const sx = page.width > 0 ? canvasW / page.width : 1;
-  const sy = page.height > 0 ? canvasH / page.height : 1;
+  if (canvasW <= 0 || canvasH <= 0 || page.width <= 0 || page.height <= 0) {
+    return { x: 0, y: 0 };
+  }
+  const sx = canvasW / page.width;
+  const sy = canvasH / page.height;
   return { x: x / sx, y: (canvasH - y) / sy };
 }
 

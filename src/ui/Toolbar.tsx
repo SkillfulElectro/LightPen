@@ -38,10 +38,10 @@ export default function Toolbar({ onOpen, onSample, onExportPdf, onExportPng }: 
     <header className="toolbar" role="toolbar" aria-label={t('app.title')}>
       <span className="brand">{t('app.title')}</span>
       <div className="toolbar-group">
-        <button type="button" onClick={onOpen} aria-label={t('toolbar.open')}>
+        <button type="button" onClick={onOpen}>
           {t('toolbar.open')}
         </button>
-        <button type="button" onClick={onSample} aria-label={t('toolbar.sample')}>
+        <button type="button" onClick={onSample}>
           {t('toolbar.sample')}
         </button>
       </div>

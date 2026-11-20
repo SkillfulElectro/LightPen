@@ -54,3 +54,28 @@ describe('helpers', () => {
     expect(trackingHint(0.15)).toBeNull();
   });
 });
+
+describe('edge cases', () => {
+  it('falls back gracefully for a zero-sized page or canvas', () => {
+    // Degenerate sizes fall back to a 1:1 scale instead of dividing by zero.
+    expect(pageToCanvas({ x: 10, y: 10 }, { width: 0, height: 0 }, 100, 100)).toEqual({
+      x: 10,
+      y: 90,
+    });
+    const back = canvasToPage(50, 50, { width: 0, height: 0 }, 100, 100);
+    expect(Number.isFinite(back.x) && Number.isFinite(back.y)).toBe(true);
+    expect(Number.isFinite(canvasToPage(50, 50, { width: 100, height: 100 }, 0, 0).x)).toBe(true);
+  });
+
+  it('clamps camera points outside the calibration rectangle to the page', () => {
+    const page = { width: 100, height: 200 };
+    const cal = { x0: 0.2, y0: 0.2, x1: 0.8, y1: 0.8 };
+    expect(cameraToPage({ x: 0, y: 0 }, cal, page, false)).toEqual({ x: 0, y: 200 });
+    expect(cameraToPage({ x: 1, y: 1 }, cal, page, false)).toEqual({ x: 100, y: 0 });
+  });
+
+  it('clampToPage keeps points inside the page', () => {
+    const page = { width: 100, height: 100 };
+    expect(clampToPage({ x: -5, y: 150 }, page)).toEqual({ x: 0, y: 100 });
+  });
+});
