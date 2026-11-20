@@ -63,7 +63,7 @@ sha256sum -c SHA256SUMS.txt --ignore-missing
 
 ## Development
 
-Requirements: **Node.js 20+** (see `.nvmrc`), **Rust 1.82** (see `rust-toolchain.toml`), and the [Tauri 2 prerequisites](https://tauri.app/start/prerequisites/) for your OS.
+Requirements: **Node.js 20+** (see `.nvmrc`), **Rust 1.90** (see `rust-toolchain.toml`), and the [Tauri 2 prerequisites](https://tauri.app/start/prerequisites/) for your OS.
 
 ```bash
 npm install            # also copies MediaPipe WASM into public/wasm
@@ -128,7 +128,7 @@ See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the diagram and data flow
 ## Status
 
 `0.1.0` — every feature in the brief is implemented and the automated gates
-(types, lint, format, 151 unit tests, 99 % statements / 95 % branches on
+(types, lint, format, 154 unit tests, 99 % statements / 95 % branches on
 `src/core`, actionlint on both workflows, web production build) pass locally.
 Annotated-PDF export was additionally validated outside the browser by parsing
 and rendering the output with pypdf and pypdfium2. Things that could not be executed

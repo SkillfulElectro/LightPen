@@ -132,6 +132,14 @@ project was developed in. Treat these as “written and reviewed” rather than
     action argument), which clap rejects. `matrix.args` is now empty and the test
     above enforces a single `--target`.
 
+  - **The pinned Rust 1.82 could not build the current dependency graph.** A
+    clean build re-resolves `tauri = "2"` to 2.12.x (MSRV **1.90**) and picked
+    `cssparser-macros 0.7.1`, which needs `edition2024` — cargo 1.82 cannot parse
+    that manifest. The pin is now **1.90.0** everywhere and
+    `.cargo/config.toml` sets `resolver.incompatible-rust-versions = "fallback"`
+    (ADR-021). Committing `Cargo.lock` remains the better long-term fix; see
+    `docs/FINAL-REPORT.md` → open issues.
+
   An earlier Windows run failed at the toolchain step: `toolchain` is a
   **required** input of `dtolnay/rust-toolchain`, and pinning the action to a
   commit SHA drops the `@stable` ref that used to supply it implicitly. Every
