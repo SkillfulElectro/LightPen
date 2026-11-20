@@ -145,7 +145,9 @@ project was developed in. Treat these as “written and reviewed” rather than
   [`PERFORMANCE.md`](PERFORMANCE.md) are targets, not measurements.
 - **Android and iOS builds** — require Android SDK/NDK/JDK 17 and Xcode; neither
   was available. `tauri android init` / `tauri ios init` are run inside the
-  workflow.
+  workflow. The Android WebView camera grant (Kotlin snippet in
+  [`MOBILE.md`](MOBILE.md)) must be applied after `android init` and is itself
+  unverified.
 - **MediaPipe GPU delegate on Safari/WKWebView** — falls back to the CPU delegate
   automatically; the fallback path is coded but untested on real iOS hardware.
 - **Code signing / notarisation** — the secret-driven steps are written but have

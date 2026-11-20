@@ -131,4 +131,5 @@ visible page is rendered (lazy) and the page proxy is cleaned up afterwards.
 | Sidecar storage | `$APPDATA` via fs plugin                           | app data dir                                                               | app documents dir                      |
 | GPU delegate    | usually available                                  | usually available                                                          | available; CPU fallback automatic      |
 
-See [`DECISIONS.md`](DECISIONS.md) for the trade-offs behind these choices.
+See [`MOBILE.md`](MOBILE.md) for the Android WebView camera grant and the mobile
+layout, and [`DECISIONS.md`](DECISIONS.md) for the trade-offs behind these choices.
