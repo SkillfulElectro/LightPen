@@ -155,12 +155,11 @@ macos-* ]]` pattern that can never match once actionlint substitutes the
   `ls | grep`). All five are fixed and the check is now reproduced locally with
   shellcheck directly.
 
-- **`release.yml` end-to-end run.** The workflow passes `actionlint` and its
-  logic was reviewed, and the first real run did build and upload the unsigned
-  Windows and Linux bundles — but it never reached a green `verify`, so
-  macOS/iOS signing and the un-drafting `publish` job remain unproven. Start
-  with a `draft=true` run with `build_macos=false`, `build_android=false`,
-  `build_ios=false`.
+- **`release.yml` end-to-end run.** Every CI job is green, `actionlint` included,
+  and the first real run did build and upload the unsigned Windows and Linux
+  bundles — but it never reached a green `verify`, so macOS/iOS signing and the
+  un-drafting `publish` job remain unproven. Start with a `draft=true` run with
+  `build_macos=false`, `build_android=false`, `build_ios=false`.
 
   The runs so far failed at the points below, all now fixed and guarded by
   `src/core/tauriConfig.test.ts` / `src/core/ciEnv.test.ts`:
