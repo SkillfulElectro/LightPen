@@ -36,7 +36,7 @@
     "targets": ["msi", "nsis", "dmg", "app", "deb", "rpm", "appimage", "apk"],
     "createUpdaterArtifacts": false,
     "publisher": "ElectroMutex",
-    "copyright": "MIT © ElectroMutex",
+    "copyright": "MIT \u00a9 ElectroMutex",
     "category": "Productivity",
     "shortDescription": "Write on PDFs in the air",
     "longDescription": "LightPen lets you open a PDF, turn on your camera and write on it in the air with your hand. All processing happens on your device.",
@@ -58,7 +58,9 @@
       "entitlements": "Entitlements.plist"
     },
     "windows": {
-      "webviewInstallMode": { "type": "downloadBootstrapper" },
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper"
+      },
       "nsis": {
         "installMode": "perMachine"
       }
@@ -68,6 +70,14 @@
     },
     "android": {
       "minSdkVersion": 24
-    }
+    },
+    "fileAssociations": [
+      {
+        "ext": ["pdf"],
+        "mimeType": "application/pdf",
+        "description": "PDF document",
+        "role": "Editor"
+      }
+    ]
   }
 }

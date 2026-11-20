@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { buildAnnotatedPdf } from './core/pdfExport';
 import { useStore, tutorialSeen } from './store/useStore';
-import { restoreWindowSize, saveBytesAs, saveWindowSize } from './platform/tauri';
+import { isTauri, restoreWindowSize, saveBytesAs, saveWindowSize } from './platform/tauri';
 import CameraPreview from './ui/CameraPreview';
 import { CheatSheet, PermissionDialog, SettingsDialog, ShortcutsHelp } from './ui/Dialogs';
 import PdfViewer from './ui/PdfViewer';
@@ -44,6 +44,55 @@ export default function App() {
     return () => mq.removeEventListener('change', apply);
   }, [settings.theme]);
 
+  // "Open with" from the OS (double-click / Finder) and CLI arguments.
+  useEffect(() => {
+    if (!isTauri()) return;
+    let unlisten: (() => void) | undefined;
+    let unlistenMenu: (() => void) | undefined;
+    void (async () => {
+      try {
+        const { invoke } = await import('@tauri-apps/api/core');
+        const { listen } = await import('@tauri-apps/api/event');
+        const openPath = async (path: string) => {
+          const file = await invoke<{ name: string; bytes: number[] } | null>('read_open_file', {
+            path,
+          });
+          if (!file) return;
+          setPdfBytes(new Uint8Array(file.bytes));
+          setPdfName(file.name);
+        };
+        unlisten = await listen<string>(
+          'lightpen:open-path',
+          (event) => void openPath(event.payload),
+        );
+
+        // Native menu → same actions as the toolbar / shortcuts.
+        const navigate: Record<string, () => void> = {
+          open: () => window.dispatchEvent(new CustomEvent('lightpen:open-dialog')),
+          undo: () => useStore.getState().undo(),
+          redo: () => useStore.getState().redo(),
+          zoom_in: () => useStore.getState().setZoom(useStore.getState().zoom + 0.25),
+          zoom_out: () => useStore.getState().setZoom(useStore.getState().zoom - 0.25),
+          fit_page: () => useStore.getState().setFitMode('fit-page'),
+          tutorial: () => useStore.getState().setTutorialOpen(true),
+          cheat_sheet: () => useStore.getState().setCheatSheetOpen(true),
+          shortcuts: () => useStore.getState().setShortcutsOpen(true),
+          export_pdf: () => window.dispatchEvent(new CustomEvent('lightpen:export-pdf')),
+          export_png: () => window.dispatchEvent(new CustomEvent('lightpen:export-png')),
+        };
+        unlistenMenu = await listen<string>('lightpen:menu', (event) =>
+          navigate[event.payload]?.(),
+        );
+      } catch {
+        // Tauri APIs unavailable (web build) — nothing to do.
+      }
+    })();
+    return () => {
+      unlisten?.();
+      unlistenMenu?.();
+    };
+  }, []);
+
   // Files opened via dialog / drag-and-drop (dispatched from PdfViewer).
   useEffect(() => {
     const handler = (e: Event) => {
@@ -79,6 +128,7 @@ export default function App() {
   }, []);
 
   const exportPdf = useCallback(async () => {
+    // Invoked from the toolbar and from the native File menu.
     const state = useStore.getState();
     const doc = state.pdf;
     if (!doc) return;
@@ -104,6 +154,18 @@ export default function App() {
     const name = (pdfName ?? 'page').replace(/\.pdf$/i, '') + `-page-${currentPage + 1}.png`;
     await saveBytesAs(name, bytes);
   }, [pdfName, currentPage]);
+
+  // Native menu export commands.
+  useEffect(() => {
+    const onPdf = () => void exportPdf();
+    const onPng = () => void exportPng();
+    window.addEventListener('lightpen:export-pdf', onPdf);
+    window.addEventListener('lightpen:export-png', onPng);
+    return () => {
+      window.removeEventListener('lightpen:export-pdf', onPdf);
+      window.removeEventListener('lightpen:export-png', onPng);
+    };
+  }, [exportPdf, exportPng]);
 
   // Keyboard shortcuts (desktop).
   useEffect(() => {
