@@ -52,3 +52,28 @@ export function sanitizeSettings(raw: unknown): Settings {
     enableErase: bool(r.enableErase, d.enableErase),
   };
 }
+
+/**
+ * Map the user-facing "pinch sensitivity" slider (0..1) to a normalised pinch
+ * threshold. Higher sensitivity = the pinch has to be tighter to register, so
+ * the threshold goes down. Keeping the mapping here means the UI can present a
+ * friendly slider while the classifier still receives a validated number.
+ */
+export function sensitivityToPinchThreshold(sensitivity: number): number {
+  const s = Math.min(1, Math.max(0, Number.isFinite(sensitivity) ? sensitivity : 0.5));
+  return 0.15 + (1 - s) * 0.5; // 0.65 (loose) .. 0.15 (tight)
+}
+
+/** Inverse of `sensitivityToPinchThreshold`, for showing the slider value. */
+export function pinchThresholdToSensitivity(threshold: number): number {
+  const clamped = Math.min(0.65, Math.max(0.15, threshold));
+  return 1 - (clamped - 0.15) / 0.5;
+}
+
+/**
+ * The release threshold for a given enter threshold: a fixed relative gap so
+ * hysteresis survives any sensitivity, clamped to a sane range.
+ */
+export function releaseThresholdFor(enterThreshold: number): number {
+  return Math.min(0.95, Math.round((enterThreshold + 0.13) * 100) / 100);
+}

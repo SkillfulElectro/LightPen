@@ -54,6 +54,12 @@ failure mode of naive pinch detection.
 **Consequences.** A visible “fist” state is also derived (all four fingers
 curled) and used for the pause gesture.
 
+The Settings slider shows a 0–100 % _sensitivity_ and is mapped onto the
+threshold by `sensitivityToPinchThreshold` / `pinchThresholdToSensitivity`
+(pure, unit-tested, round-trip exact). The release threshold is always derived
+with `releaseThresholdFor(enter)`, so no combination of slider positions can
+produce a threshold pair without hysteresis.
+
 ## ADR-005 — One Euro filter for smoothing
 
 **Decision.** Filter x and y with a One Euro filter (Casiez, Roussel & Vogel 2012)

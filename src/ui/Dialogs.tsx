@@ -2,6 +2,11 @@
 
 import { useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
+import {
+  pinchThresholdToSensitivity,
+  releaseThresholdFor,
+  sensitivityToPinchThreshold,
+} from '../core/settings';
 import { LANGUAGES, initI18n } from '../i18n';
 import { useStore } from '../store/useStore';
 import { PauseIllustration } from './illustrations';
@@ -95,14 +100,21 @@ export function SettingsDialog() {
   return (
     <Modal title={t('settings.title')} onClose={() => setOpen(false)}>
       <label>
-        {t('settings.pinchThreshold')} ({settings.pinchThreshold.toFixed(2)})
+        {t('settings.pinchThreshold')} (
+        {Math.round(pinchThresholdToSensitivity(settings.pinchThreshold) * 100)}%)
         <input
           type="range"
-          min={0.1}
-          max={0.8}
-          step={0.01}
-          value={settings.pinchThreshold}
-          onChange={(e) => update({ pinchThreshold: Number(e.target.value) })}
+          min={0}
+          max={100}
+          step={1}
+          value={Math.round(pinchThresholdToSensitivity(settings.pinchThreshold) * 100)}
+          onChange={(e) => {
+            const threshold = sensitivityToPinchThreshold(Number(e.target.value) / 100);
+            update({
+              pinchThreshold: threshold,
+              pinchReleaseThreshold: releaseThresholdFor(threshold),
+            });
+          }}
         />
       </label>
       <label>

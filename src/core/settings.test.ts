@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { sanitizeSettings } from './settings';
+import {
+  pinchThresholdToSensitivity,
+  releaseThresholdFor,
+  sanitizeSettings,
+  sensitivityToPinchThreshold,
+} from './settings';
 import { DEFAULT_SETTINGS } from './types';
 
 describe('sanitizeSettings', () => {
@@ -65,5 +70,35 @@ describe('sanitizeSettings extra rules', () => {
     expect(sanitizeSettings({ smoothingBeta: Number.POSITIVE_INFINITY }).smoothingBeta).toBe(
       DEFAULT_SETTINGS.smoothingBeta,
     );
+  });
+});
+
+describe('sensitivity helpers', () => {
+  it('maps sensitivity onto a bounded pinch threshold, monotonically', () => {
+    expect(sensitivityToPinchThreshold(1)).toBeCloseTo(0.15);
+    expect(sensitivityToPinchThreshold(0)).toBeCloseTo(0.65);
+    expect(sensitivityToPinchThreshold(0.5)).toBeCloseTo(0.4);
+    for (let s = 0; s <= 1.0001; s += 0.1) {
+      const t = sensitivityToPinchThreshold(s);
+      expect(t).toBeGreaterThanOrEqual(0.15);
+      expect(t).toBeLessThanOrEqual(0.65);
+    }
+    expect(sensitivityToPinchThreshold(2)).toBeLessThan(sensitivityToPinchThreshold(0.5));
+    expect(sensitivityToPinchThreshold(Number.NaN)).toBeCloseTo(sensitivityToPinchThreshold(0.5));
+  });
+
+  it('round-trips between the slider and the threshold', () => {
+    for (const s of [0, 0.25, 0.5, 0.75, 1]) {
+      expect(pinchThresholdToSensitivity(sensitivityToPinchThreshold(s))).toBeCloseTo(s, 6);
+    }
+    expect(pinchThresholdToSensitivity(9)).toBe(0);
+    expect(pinchThresholdToSensitivity(0)).toBe(1);
+  });
+
+  it('always keeps the release threshold above the enter threshold', () => {
+    for (const enter of [0.15, 0.3, 0.5, 0.65]) {
+      expect(releaseThresholdFor(enter)).toBeGreaterThan(enter);
+      expect(releaseThresholdFor(enter)).toBeLessThanOrEqual(0.95);
+    }
   });
 });
