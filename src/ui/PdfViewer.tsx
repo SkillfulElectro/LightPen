@@ -281,6 +281,29 @@ export default function PdfViewer({ pdfBytes, pdfName, onPdfLoaded }: Props) {
     drawInk();
   };
 
+  // ---- ctrl/cmd + wheel and trackpad pinch zoom around the pointer ----
+  // Browsers deliver trackpad pinch as a wheel event with `ctrlKey: true`, so
+  // this single handler covers pinch-to-zoom and Ctrl+scroll on every desktop.
+  const onWheel = (e: React.WheelEvent<HTMLDivElement>) => {
+    if (!e.ctrlKey && !e.metaKey) return;
+    e.preventDefault();
+    const container = e.currentTarget;
+    const rect = container.getBoundingClientRect();
+    // Keep the point under the cursor stable while zooming.
+    const px = e.clientX - rect.left + container.scrollLeft;
+    const py = e.clientY - rect.top + container.scrollTop;
+    const factor = Math.exp(-e.deltaY * 0.002);
+    const current = useStore.getState().zoom;
+    const next = Math.min(4, Math.max(0.25, current * factor));
+    if (next === current) return;
+    useStore.getState().setZoom(next);
+    requestAnimationFrame(() => {
+      const ratio = next / current;
+      container.scrollLeft = px * ratio - (e.clientX - rect.left);
+      container.scrollTop = py * ratio - (e.clientY - rect.top);
+    });
+  };
+
   // ---- drag & drop ----
   const onDrop = (e: React.DragEvent) => {
     e.preventDefault();
@@ -347,6 +370,7 @@ export default function PdfViewer({ pdfBytes, pdfName, onPdfLoaded }: Props) {
       className="viewer-scroll"
       onDragOver={(e) => e.preventDefault()}
       onDrop={onDrop}
+      onWheel={onWheel}
     >
       <div className="page-stack" style={{ width: cssW, height: cssH }}>
         <canvas ref={pageCanvasRef} className="page-canvas" aria-label="PDF page" />

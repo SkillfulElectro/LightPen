@@ -136,6 +136,27 @@ test('keyboard shortcuts: eraser and zoom', async ({ page }) => {
   );
 });
 
+test('ctrl + wheel zoom keeps the point under the cursor and switches to manual fit', async ({
+  page,
+}) => {
+  await openSample(page);
+  const viewer = page.locator('.viewer-scroll');
+  await viewer.hover({ position: { x: 200, y: 200 } });
+  const zoomLabel = page.locator('.zoom-label');
+  const before = Number((await zoomLabel.textContent())?.replace('%', ''));
+  await page.keyboard.down('Control');
+  await page.mouse.wheel(0, -240);
+  await page.keyboard.up('Control');
+  await expect
+    .poll(async () => Number((await zoomLabel.textContent())?.replace('%', '')))
+    .toBeGreaterThan(before);
+
+  // A plain wheel scrolls the page instead of zooming.
+  const zoomed = Number((await zoomLabel.textContent())?.replace('%', ''));
+  await page.mouse.wheel(0, -240);
+  await expect(zoomLabel).toHaveText(`${zoomed}%`);
+});
+
 test('settings dialog exposes the full surface and re-runs calibration', async ({ page }) => {
   await page.getByRole('button', { name: 'Settings' }).click();
   const dialog = page.getByRole('dialog', { name: 'Settings' });
