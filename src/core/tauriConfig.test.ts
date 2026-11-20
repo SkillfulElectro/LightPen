@@ -215,3 +215,83 @@ describe('release workflow secret handling', () => {
     expect(signing).toBeGreaterThan(init);
   });
 });
+
+describe('release matrix and optional signing', () => {
+  const release = () => read('.github/workflows/release.yml');
+
+  /** Extract single-quoted literals in source order (no regex escaping games). */
+  function singleQuoted(text: string): string[] {
+    const out: string[] = [];
+    for (let i = 0; i < text.length; i += 1) {
+      if (text[i] !== "'") continue;
+      let j = i + 1;
+      while (j < text.length && text[j] !== "'") j += text[j] === '\\' ? 2 : 1;
+      out.push(text.slice(i + 1, j));
+      i = j;
+    }
+    return out;
+  }
+
+  /** Rows the desktop matrix expression yields for a given build_macos value. */
+  function desktopRows(buildMacos: boolean): { name: string; os: string }[] {
+    const text = release();
+    const start = text.indexOf('include: >-');
+    // Anchor on the FIRST `env:` AFTER the matrix (indexOf from 0 would hit the
+    // workflow-level env block, which sits above this job).
+    const end = text.indexOf('\n    env:', start);
+    const block = text.slice(start, end);
+    const rows = singleQuoted(block).filter((s) => s.startsWith('{"name"'));
+    expect(rows).toHaveLength(3);
+    // `format('[{0}{1}{2}]', a, cond && macos || '', b)`
+    const joined = `[${rows[0]}${buildMacos ? rows[1] : ''}${rows[2]}]`;
+    return JSON.parse(joined) as { name: string; os: string }[];
+  }
+
+  it('has a build_macos checkbox, off by default', () => {
+    const text = release();
+    expect(text).toMatch(
+      /build_macos:\s*\n\s+description:.*\n\s+required: false\s*\n\s+default: false/,
+    );
+  });
+
+  it('skips the macOS row when build_macos is unchecked', () => {
+    const names = desktopRows(false).map((r) => r.name);
+    expect(names).toEqual(['windows-x64', 'windows-arm64', 'linux-x64']);
+    expect(desktopRows(false).some((r) => r.os.startsWith('macos'))).toBe(false);
+  });
+
+  it('includes macOS when build_macos is checked', () => {
+    const rows = desktopRows(true);
+    expect(rows.map((r) => r.name)).toContain('macos-universal');
+    expect(rows.every((r) => r.name && r.os)).toBe(true);
+  });
+
+  it('never references a signing secret in the build step env', () => {
+    // An unset secret is injected as an EMPTY STRING, so referencing it still
+    // defines the variable; tauri then tries to import "" as a p12 certificate.
+    const text = release();
+    const build = text.slice(
+      text.indexOf('name: Build bundles'),
+      text.indexOf('Normalise artifact names'),
+    );
+    expect(build).not.toMatch(/secrets\.(APPLE|WINDOWS)_/);
+    expect(build).toContain('GITHUB_TOKEN');
+  });
+
+  it('exports optional secrets only when they are non-empty', () => {
+    const text = release();
+    const step = text.slice(
+      text.indexOf('name: Prepare optional signing'),
+      text.indexOf('name: Build bundles'),
+    );
+    expect(step).toContain('export_optional');
+    expect(step).toContain('if [[ -n "${2:-}" ]]');
+    expect(step).toContain('APPLE_CERTIFICATE "$SECRET_APPLE_CERT"');
+  });
+
+  it('fails early when a certificate has no password', () => {
+    const text = release();
+    expect(text).toContain('APPLE_CERTIFICATE is set but APPLE_CERTIFICATE_PASSWORD is not');
+    expect(text).toContain('WINDOWS_CERTIFICATE is set but WINDOWS_CERTIFICATE_PASSWORD is not');
+  });
+});

@@ -26,6 +26,11 @@ on:
         required: false
         default: true
         type: boolean
+      build_macos:
+        description: 'Build macOS (.dmg/.app). Unset signing secrets produce an unsigned build.'
+        required: false
+        default: false
+        type: boolean
       build_ios:
         description: 'Build iOS (.ipa). Requires Apple signing secrets.'
         required: false
@@ -136,23 +141,20 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - name: windows-x64
-            os: windows-latest
-            target: x86_64-pc-windows-msvc
-            args: ''
-          - name: windows-arm64
-            os: windows-latest
-            target: aarch64-pc-windows-msvc
-            args: ''
-          - name: macos-universal
-            os: macos-latest
-            target: universal-apple-darwin
-            args: ''
-          - name: linux-x64
-            os: ubuntu-22.04
-            target: x86_64-unknown-linux-gnu
-            args: ''
+        # `include:` cannot exclude rows, and expressions have no string
+        # concatenation operator, so the JSON is assembled with format().
+        # macOS is opt-in (build_macos): it is the only desktop target that needs
+        # an Apple Developer certificate, and an unsigned .dmg is Gatekeeper-blocked.
+        include: >-
+          ${{
+            fromJSON(
+              format('[{0}{1}{2}]',
+                '{"name":"windows-x64","os":"windows-latest","target":"x86_64-pc-windows-msvc","args":""},',
+                inputs.build_macos && '{"name":"macos-universal","os":"macos-latest","target":"universal-apple-darwin","args":""},' || '',
+                '{"name":"windows-arm64","os":"windows-latest","target":"aarch64-pc-windows-msvc","args":""},{"name":"linux-x64","os":"ubuntu-22.04","target":"x86_64-unknown-linux-gnu","args":""}'
+              )
+            )
+          }}
     env:
       RELEASE_ID: ${{ needs.prepare.outputs.release_id }}
       VERSION: ${{ needs.prepare.outputs.version }}
@@ -189,21 +191,65 @@ jobs:
       - name: Check versions are in sync
         run: npm run check:versions
 
+      - name: Prepare optional signing
+        # Signing is entirely optional, and this step is the reason the macOS leg
+        # used to fail without secrets: an *unset* repository secret is injected
+        # as an EMPTY STRING, so `env: APPLE_CERTIFICATE: ${{ secrets.X }}` still
+        # defines the variable. tauri checks `var_os(...).is_some()`, so it tried
+        # to base64-decode "" and codesign with an empty certificate:
+        #   SecKeychainItemImport: Unable to decode the provided data.
+        # Export these only from here, and only when they hold a real value.
+        shell: bash
+        env:
+          SECRET_APPLE_CERT: ${{ secrets.APPLE_CERTIFICATE }}
+          SECRET_APPLE_CERT_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          SECRET_APPLE_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          SECRET_APPLE_ID: ${{ secrets.APPLE_ID }}
+          SECRET_APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          SECRET_APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          SECRET_WINDOWS_CERT: ${{ secrets.WINDOWS_CERTIFICATE }}
+          SECRET_WINDOWS_CERT_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+          SECRET_UPDATER_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          SECRET_UPDATER_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          export_optional() {  # name, value
+            if [[ -n "${2:-}" ]]; then
+              printf '%s=%s\n' "$1" "$2" >> "$GITHUB_ENV"
+              echo "· $1 set"
+            else
+              echo "· $1 not configured (signing skipped for it)"
+            fi
+          }
+          export_optional APPLE_CERTIFICATE "$SECRET_APPLE_CERT"
+          export_optional APPLE_CERTIFICATE_PASSWORD "$SECRET_APPLE_CERT_PASSWORD"
+          export_optional APPLE_SIGNING_IDENTITY "$SECRET_APPLE_IDENTITY"
+          export_optional APPLE_ID "$SECRET_APPLE_ID"
+          export_optional APPLE_PASSWORD "$SECRET_APPLE_PASSWORD"
+          export_optional APPLE_TEAM_ID "$SECRET_APPLE_TEAM_ID"
+          export_optional WINDOWS_CERTIFICATE "$SECRET_WINDOWS_CERT"
+          export_optional WINDOWS_CERTIFICATE_PASSWORD "$SECRET_WINDOWS_CERT_PASSWORD"
+          export_optional TAURI_SIGNING_PRIVATE_KEY "$SECRET_UPDATER_KEY"
+          export_optional TAURI_SIGNING_PRIVATE_KEY_PASSWORD "$SECRET_UPDATER_KEY_PASSWORD"
+
+          # A certificate without its password cannot be imported — fail early
+          # with a clear message instead of a pkcs12 error mid-bundle.
+          if [[ -n "${SECRET_APPLE_CERT:-}" && -z "${SECRET_APPLE_CERT_PASSWORD:-}" ]]; then
+            echo "::error::APPLE_CERTIFICATE is set but APPLE_CERTIFICATE_PASSWORD is not."
+            exit 1
+          fi
+          if [[ -n "${SECRET_WINDOWS_CERT:-}" && -z "${SECRET_WINDOWS_CERT_PASSWORD:-}" ]]; then
+            echo "::error::WINDOWS_CERTIFICATE is set but WINDOWS_CERTIFICATE_PASSWORD is not."
+            exit 1
+          fi
+
       - name: Build bundles and upload to the release
         uses: tauri-apps/tauri-action@1deb371b0cd8bd54025b384f1cd735e725c4060f # action-v1.0.0
+        # No secret is referenced here on purpose: `prepare optional signing` has
+        # already exported the ones that are actually configured, and referencing
+        # an unset secret would define an empty variable (see that step).
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Optional signing — everything below is secret-driven and may be empty.
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
-          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
         with:
           releaseId: ${{ env.RELEASE_ID }}
           # A single --target: the matrix already carries it (a universal macOS
@@ -259,17 +305,24 @@ jobs:
 
       - name: Job summary
         shell: bash
-        env:
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+        # APPLE_CERTIFICATE / WINDOWS_CERTIFICATE were exported by
+        # `prepare optional signing` only when a real value exists, so an empty
+        # value here genuinely means "not configured".
         run: |
           {
             echo "### Desktop — ${{ matrix.name }}"
             echo ""
-            if [[ -z "${APPLE_CERTIFICATE:-}${WINDOWS_CERTIFICATE:-}" ]]; then
-              echo "⚠️ No code-signing certificate secret configured — this artifact is unsigned."
-            else
-              echo "✅ Signed / notarised where signing secrets were available."
+            case "${{ matrix.os }}" in
+              macos-*) signed="${APPLE_CERTIFICATE:-}" ;;
+              windows-*) signed="${WINDOWS_CERTIFICATE:-}" ;;
+              *) echo "✅ Linux bundles are not code-signed (not applicable)." ; signed="" ;;
+            esac
+            if [[ "${{ matrix.os }}" == macos-* || "${{ matrix.os }}" == windows-* ]]; then
+              if [[ -z "$signed" ]]; then
+                echo "⚠️ No code-signing certificate configured — this artifact is **unsigned**."
+              else
+                echo "✅ Signed (and notarised when Apple credentials were present)."
+              fi
             fi
             echo ""
             ls -l renamed 2>/dev/null || true
