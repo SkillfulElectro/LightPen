@@ -40,34 +40,6 @@ export function cameraToPage(
   return { x: nx * page.width, y: (1 - ny) * page.height };
 }
 
-/** Map PDF points to canvas CSS pixels (top-left origin). */
-export function pageToCanvas(
-  point: PdfPoint,
-  page: PageSize,
-  canvasW: number,
-  canvasH: number,
-): { x: number; y: number } {
-  const sx = page.width > 0 ? canvasW / page.width : 1;
-  const sy = page.height > 0 ? canvasH / page.height : 1;
-  return { x: point.x * sx, y: canvasH - point.y * sy };
-}
-
-/** Map canvas CSS pixels back to PDF points. */
-export function canvasToPage(
-  x: number,
-  y: number,
-  page: PageSize,
-  canvasW: number,
-  canvasH: number,
-): PdfPoint {
-  if (canvasW <= 0 || canvasH <= 0 || page.width <= 0 || page.height <= 0) {
-    return { x: 0, y: 0 };
-  }
-  const sx = canvasW / page.width;
-  const sy = canvasH / page.height;
-  return { x: x / sx, y: (canvasH - y) / sy };
-}
-
 /** Clamp a PDF point inside the page with a small margin. */
 export function clampToPage(point: PdfPoint, page: PageSize, margin = 0): PdfPoint {
   return {

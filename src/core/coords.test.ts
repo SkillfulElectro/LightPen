@@ -1,11 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
   cameraToPage,
-  canvasToPage,
   clampToPage,
   frameBrightness,
   isLowLight,
-  pageToCanvas,
   pdfToViewport,
   pageDisplaySize,
   pageViewportMatrix,
@@ -45,16 +43,6 @@ describe('cameraToPage', () => {
   });
 });
 
-describe('canvas round-trip', () => {
-  it('pageToCanvas and canvasToPage are inverses', () => {
-    const p = { x: 100, y: 200 };
-    const c = pageToCanvas(p, PAGE, 306, 396);
-    const back = canvasToPage(c.x, c.y, PAGE, 306, 396);
-    expect(back.x).toBeCloseTo(100);
-    expect(back.y).toBeCloseTo(200);
-  });
-});
-
 describe('helpers', () => {
   it('clampToPage clamps with margin', () => {
     expect(clampToPage({ x: -10, y: 9999 }, PAGE, 5)).toEqual({ x: 5, y: 787 });
@@ -68,15 +56,19 @@ describe('helpers', () => {
 });
 
 describe('edge cases', () => {
-  it('falls back gracefully for a zero-sized page or canvas', () => {
-    // Degenerate sizes fall back to a 1:1 scale instead of dividing by zero.
-    expect(pageToCanvas({ x: 10, y: 10 }, { width: 0, height: 0 }, 100, 100)).toEqual({
-      x: 10,
-      y: 90,
-    });
-    const back = canvasToPage(50, 50, { width: 0, height: 0 }, 100, 100);
-    expect(Number.isFinite(back.x) && Number.isFinite(back.y)).toBe(true);
-    expect(Number.isFinite(canvasToPage(50, 50, { width: 100, height: 100 }, 0, 0).x)).toBe(true);
+  it('never produces NaN for degenerate pages or matrices', () => {
+    const zero = { width: 0, height: 0 };
+    expect(Number.isFinite(pageDisplaySize(zero, 90, 1).width)).toBe(true);
+    // The matrix is valid (det = -1), so a round-trip is exact even for a 0-sized page.
+    const m = pageViewportMatrix(zero, 0, 1);
+    const rt = viewportToPdf(5, 5, m);
+    expect(Number.isFinite(rt.x) && Number.isFinite(rt.y)).toBe(true);
+    const back = pdfToViewport(rt, m);
+    expect(back.x).toBeCloseTo(5);
+    expect(back.y).toBeCloseTo(5);
+    expect(Number.isFinite(pdfToViewport({ x: 1, y: 1 }, pageViewportMatrix(zero, 180, 1)).x)).toBe(
+      true,
+    );
   });
 
   it('clamps camera points outside the calibration rectangle to the page', () => {
