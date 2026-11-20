@@ -51,7 +51,6 @@ export default function CameraPreview({ pageSize, onGesture }: Props) {
   const hint = useStore((s) => s.tracking.hint);
   const settings = useStore((s) => s.settings);
   const setTracking = useStore((s) => s.setTracking);
-  const currentPage = useStore((s) => s.currentPage);
 
   const refreshCameras = useCallback(async () => {
     setCameras(await listCameras());
@@ -180,21 +179,21 @@ export default function CameraPreview({ pageSize, onGesture }: Props) {
             pageSize,
           );
 
+          // Read the live page index: a swipe inside this loop changes it, and a
+          // captured value would keep drawing on the page we left.
+          const page = useStore.getState().currentPage;
+          if (activeStroke && activeStroke.page !== page) finishStroke();
+
           if (g.kind === 'pen-down') {
             if (!activeStroke) {
-              activeStroke = createStroke(
-                currentPage,
-                settings.penColor,
-                settings.penWidth,
-                pagePoint,
-              );
+              activeStroke = createStroke(page, settings.penColor, settings.penWidth, pagePoint);
               useStore.setState({ activeStroke });
             } else {
               addPoint(activeStroke, pagePoint);
             }
           } else if (g.kind === 'erase') {
             finishStroke();
-            useStore.getState().eraseAt(currentPage, palmPage, 18);
+            useStore.getState().eraseAt(page, palmPage, 18);
           } else {
             finishStroke();
           }
@@ -232,7 +231,7 @@ export default function CameraPreview({ pageSize, onGesture }: Props) {
       stop();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [settings, pageSize, currentPage]);
+  }, [settings, pageSize, stop, setTracking, onGesture]);
 
   // Let the permission dialog trigger tracking.
   useEffect(() => registerTrackingStarter(start), [start]);

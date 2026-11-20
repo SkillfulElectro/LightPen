@@ -10,7 +10,13 @@ import { useTranslation } from 'react-i18next';
 import { addPoint, createStroke, hexToRgb } from '../core/annotations';
 import { canvasToPage, clampToPage, pageToCanvas } from '../core/coords';
 import type { PageSize, Stroke } from '../core/types';
-import { getPageSize, loadPdf, usePageRenderer, type PdfErrorKind } from '../hooks/usePdfDocument';
+import {
+  classifyPdfError,
+  getPageSize,
+  loadPdf,
+  usePageRenderer,
+  type PdfErrorKind,
+} from '../hooks/usePdfDocument';
 import { restoreAnnotations, useStore } from '../store/useStore';
 import { openPdfFile } from '../platform/tauri';
 
@@ -66,19 +72,7 @@ export default function PdfViewer({ pdfBytes, pdfName, onPdfLoaded }: Props) {
       .catch((err: unknown) => {
         if (cancelled) return;
         const kind = (err as { kind?: PdfErrorKind })?.kind;
-        if (kind === 'too-large') setError('too-large');
-        else {
-          const { classifyPdfError } = {
-            classifyPdfError: (e: unknown) => {
-              const name = (e as { name?: string })?.name ?? '';
-              const message = (e as { message?: string })?.message ?? '';
-              if (name === 'PasswordException' || /password/i.test(message))
-                return 'encrypted' as const;
-              return 'corrupt' as const;
-            },
-          };
-          setError(classifyPdfError(err));
-        }
+        setError(kind ?? classifyPdfError(err));
       });
     return () => {
       cancelled = true;
