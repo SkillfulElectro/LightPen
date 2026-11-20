@@ -14,13 +14,21 @@ the WebView's `PermissionRequest`; without that, `getUserMedia` rejects and the
 app shows its normal "camera not supported / permission denied" recovery UI
 (manual drawing still works).
 
-The manifest additions live in `src-tauri/AndroidManifest.fragment.xml`
-(`CAMERA` + a non-required camera `uses-feature`, so tablets without a camera can
-still install and draw manually).
+Both halves are applied automatically after `npm run tauri android init`:
 
-Approve the request in the generated `MainActivity` (created by
-`npm run tauri android init`, path
-`src-tauri/gen/android/app/src/main/java/app/lightpen/desktop/MainActivity.kt`):
+```bash
+npm run android:permissions
+```
+
+`src-tauri/gen/android` is generated and gitignored, so the committed sources are
+`src-tauri/android/MainActivity.kt.tmpl` and the entries in
+`scripts/patch-android-permissions.mjs`. The script is idempotent and `release.yml`
+runs it before the Android build. It adds `CAMERA`, `android.webkit.PermissionRequest`
+and a non-required camera `uses-feature` (tablets without a camera still install
+and can draw manually), then writes the `MainActivity` below.
+
+Approve the request in the generated `MainActivity` — the committed template is
+`src-tauri/android/MainActivity.kt.tmpl`:
 
 ```kotlin
 package app.lightpen.desktop
@@ -77,9 +85,10 @@ class MainActivity : TauriActivity() {
 ```
 
 > Status: **unverified.** The snippet follows the standard Android WebView
-> pattern but was not compiled or run (no Android SDK/NDK in the development
-> environment). Apply it after `tauri android init`, then run the Android items in
-> `docs/QA-CHECKLIST.md`. `docs/RELEASING.md` lists this under Unverified as well.
+> pattern and is applied by a script that is tested for idempotence, but it was
+> not compiled or run (no Android SDK/NDK in the development environment). Run
+> the Android items in `docs/QA-CHECKLIST.md` after the first real build;
+> `docs/RELEASING.md` lists this under Unverified as well.
 
 ### Layout
 
@@ -104,3 +113,8 @@ pausing tracking.
 
 Both mobile builds are unverified for the same reason: no Xcode or Android SDK
 here. See `docs/RELEASING.md` → Unverified.
+
+Note that `bundle.targets` in `tauri.conf.json` must never list `apk`, `aab` or
+`ipa`: those are not bundle targets in Tauri 2 and make `tauri build` fail
+validation on every desktop platform. Android artifacts come from
+`tauri android build` (see `release.yml`), not from `tauri build`.

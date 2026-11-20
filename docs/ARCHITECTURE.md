@@ -126,7 +126,7 @@ visible page is rendered (lazy) and the page proxy is cleaned up afterwards.
 
 | Concern         | Desktop                                            | Android                                                                    | iOS                                    |
 | --------------- | -------------------------------------------------- | -------------------------------------------------------------------------- | -------------------------------------- |
-| Camera          | `getUserMedia` in WebKitGTK / WebView2 / WKWebView | WebView `PermissionRequest` (see `src-tauri/AndroidManifest.fragment.xml`) | WKWebView + `NSCameraUsageDescription` |
+| Camera          | `getUserMedia` in WebKitGTK / WebView2 / WKWebView | WebView `PermissionRequest` (see `src-tauri/android/MainActivity.kt.tmpl`) | WKWebView + `NSCameraUsageDescription` |
 | File picking    | native dialog plugin                               | document picker via dialog plugin                                          | document picker via dialog plugin      |
 | Sidecar storage | `$APPDATA` via fs plugin                           | app data dir                                                               | app documents dir                      |
 | GPU delegate    | usually available                                  | usually available                                                          | available; CPU fallback automatic      |

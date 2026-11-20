@@ -1,8 +1,0 @@
-<!-- Merged into src-tauri/gen/android/app/src/main/AndroidManifest.xml by
-     `npm run tauri android init`. Camera is required for hand tracking;
-     no network permission is requested by the app itself. -->
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
-  <uses-feature android:name="android.hardware.camera" android:required="false" />
-  <uses-permission android:name="android.permission.CAMERA" />
-  <uses-permission android:name="android.webkit.PermissionRequest" />
-</manifest>

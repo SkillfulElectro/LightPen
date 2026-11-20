@@ -121,7 +121,18 @@ project was developed in. Treat these as “written and reviewed” rather than
   and artefact renaming are unproven. The first run should be a `draft=true` dry
   run with `build_android=false`, `build_ios=false`.
 
-  The first real Windows run failed at the toolchain step: `toolchain` is a
+  The first real run then failed at two points, both now fixed and guarded:
+
+  - **`bundle > targets` was schema-invalid.** It listed `apk`, which is not a
+    Tauri 2 bundle type (Android is built by `tauri android build`), so
+    `tauri build` refused to start on _every_ platform. `src/core/tauriConfig.test.ts`
+    now rejects unknown targets and unknown `tauri-action` inputs; the config
+    validates against Tauri's published schema.
+  - **The macOS job passed `--target` twice** (once in `matrix.args`, once as the
+    action argument), which clap rejects. `matrix.args` is now empty and the test
+    above enforces a single `--target`.
+
+  An earlier Windows run failed at the toolchain step: `toolchain` is a
   **required** input of `dtolnay/rust-toolchain`, and pinning the action to a
   commit SHA drops the `@stable` ref that used to supply it implicitly. Every
   step now passes `toolchain: ${{ env.RUST_TOOLCHAIN }}`, and
