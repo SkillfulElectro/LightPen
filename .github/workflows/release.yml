@@ -155,8 +155,9 @@ jobs:
               )
             )
           }}
+    # No RELEASE_ID here: the build steps must not upload, and `tauri-action`
+    # would use it to publish the bundles under their default names as well.
     env:
-      RELEASE_ID: ${{ needs.prepare.outputs.release_id }}
       VERSION: ${{ needs.prepare.outputs.version }}
       BUILD_ANDROID: ${{ inputs.build_android }}
     steps:
@@ -243,15 +244,20 @@ jobs:
             exit 1
           fi
 
-      - name: Build bundles and upload to the release
+      - name: Build the app
         uses: tauri-apps/tauri-action@1deb371b0cd8bd54025b384f1cd735e725c4060f # action-v1.0.0
         # No secret is referenced here on purpose: `prepare optional signing` has
         # already exported the ones that are actually configured, and referencing
         # an unset secret would define an empty variable (see that step).
+        #
+        # Deliberately NO `releaseId`: the action would upload the bundles under
+        # their default names (`LightPen_0.1.0_amd64.AppImage`, `-setup.exe`, …)
+        # *and* we upload renamed copies below, so every artifact appeared twice
+        # in the release. The action only builds now; the next steps publish.
+        # The `--target` also means nothing here is a "plain binary" upload.
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          releaseId: ${{ env.RELEASE_ID }}
           # A single --target: the matrix already carries it (a universal macOS
           # build is expressed as the universal-apple-darwin pseudo-target).
           args: ${{ matrix.args }} --target ${{ matrix.target }}
@@ -596,6 +602,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ needs.prepare.outputs.tag }}
           VERSION: ${{ needs.prepare.outputs.version }}
+          BUILD_MACOS: ${{ inputs.build_macos }}
           BUILD_ANDROID: ${{ inputs.build_android }}
           BUILD_IOS: ${{ inputs.build_ios }}
         run: |
@@ -603,12 +610,15 @@ jobs:
           gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' > assets.txt
           cat assets.txt
 
+          # Every optional platform must be gated on the SAME workflow input that
+          # decides whether its job/row runs. macOS is opt-in, so expecting it
+          # unconditionally failed the verify step of a correct release.
           expected=(
             "LightPen_${VERSION}_windows-x64"
             "LightPen_${VERSION}_windows-arm64"
-            "LightPen_${VERSION}_macos-universal"
             "LightPen_${VERSION}_linux-x64"
           )
+          [[ "$BUILD_MACOS" == "true" ]] && expected+=("LightPen_${VERSION}_macos-universal")
           [[ "$BUILD_ANDROID" == "true" ]] && expected+=("LightPen_${VERSION}_android_universal")
           [[ "$BUILD_IOS" == "true" ]] && expected+=("LightPen_${VERSION}_ios_arm64")
 
@@ -627,6 +637,22 @@ jobs:
             exit 1
           fi
           echo "All expected artifacts are present."
+
+          # Names this workflow can produce. Anything else is either a stale asset
+          # from an older run or a bundle uploaded under Tauri's default name (which
+          # `tauri-action` does whenever it is handed a `releaseId`). Warning only:
+          # old drafts are reused, so failing here would be a permanent trap.
+          unexpected=()
+          while IFS= read -r asset; do
+            [[ -z "$asset" ]] && continue
+            [[ "$asset" == "SHA256SUMS.txt" ]] && continue
+            if [[ ! "$asset" =~ ^LightPen_[0-9]+\.[0-9]+\.[0-9]+_(windows-x64|windows-arm64|linux-x64|macos-universal|android_universal|ios_arm64)\.[A-Za-z0-9.]+$ ]]; then
+              unexpected+=("$asset")
+            fi
+          done < assets.txt
+          if (( ${#unexpected[@]} > 0 )); then
+            echo "::warning::Unexpected release assets (not part of the naming scheme): ${unexpected[*]}"
+          fi
 
       - name: Generate SHA256SUMS.txt
         env:
