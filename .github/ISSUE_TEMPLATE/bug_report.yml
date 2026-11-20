@@ -1,0 +1,60 @@
+name: Bug report
+description: Something in LightPen does not work as expected
+labels: ['bug', 'needs-triage']
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report! Please do not include private PDFs or personal data.
+        For security issues use the Security tab instead of a public issue.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What did you do, what did you expect, what happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open ...
+        2. Turn on the camera ...
+        3. Pinch ...
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: LightPen version
+      description: Shown in Settings, or the release tag you downloaded
+    validations:
+      required: true
+  - type: input
+    id: platform
+    attributes:
+      label: Platform
+      placeholder: Windows 11 / macOS 14.5 (M2) / Ubuntu 22.04 / Android 14 / iOS 17
+    validations:
+      required: true
+  - type: dropdown
+    id: mode
+    attributes:
+      label: Input mode
+      options:
+        - Hand tracking (camera)
+        - Mouse / touch / stylus
+        - Both
+    validations:
+      required: true
+  - type: input
+    id: fps
+    attributes:
+      label: Measured FPS (hand tracking only)
+      placeholder: e.g. 28
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or screenshots
+      description: Drag images here. Please redact anything personal.

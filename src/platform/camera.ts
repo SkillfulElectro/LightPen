@@ -89,7 +89,7 @@ export function runFrameLoop(
     onFrame(nowMs);
     frames += 1;
     if (onFps && nowMs - lastFpsTime >= 1000) {
-      onFps(frames * 1000 / (nowMs - lastFpsTime));
+      onFps((frames * 1000) / (nowMs - lastFpsTime));
       frames = 0;
       lastFpsTime = nowMs;
     }

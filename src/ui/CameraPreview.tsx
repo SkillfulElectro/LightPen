@@ -14,7 +14,14 @@ import { cameraToPage, clampToPage, trackingHint } from '../core/coords';
 import { GestureClassifier } from '../core/gesture';
 import { OneEuroPoint } from '../core/oneEuro';
 import type { PageSize, Stroke } from '../core/types';
-import { CameraError, listCameras, runFrameLoop, startCamera, stopCamera, type CameraDevice } from '../platform/camera';
+import {
+  CameraError,
+  listCameras,
+  runFrameLoop,
+  startCamera,
+  stopCamera,
+  type CameraDevice,
+} from '../platform/camera';
 import { closeHandLandmarker, detectHand, getHandLandmarker } from '../platform/mediapipe';
 import { useStore } from '../store/useStore';
 
@@ -144,7 +151,12 @@ export default function CameraPreview({ pageSize, onGesture }: Props) {
 
           if (g.kind === 'pen-down') {
             if (!activeStroke) {
-              activeStroke = createStroke(currentPage, settings.penColor, settings.penWidth, pagePoint);
+              activeStroke = createStroke(
+                currentPage,
+                settings.penColor,
+                settings.penWidth,
+                pagePoint,
+              );
               useStore.setState({ activeStroke });
             } else {
               addPoint(activeStroke, pagePoint);
@@ -183,7 +195,8 @@ export default function CameraPreview({ pageSize, onGesture }: Props) {
       stopLoopRef.current = stopLoop;
       setTracking({ active: true });
     } catch (err) {
-      if (err instanceof CameraError) setError(t(`camera.${err.kind === 'unknown' ? 'unsupported' : err.kind}`));
+      if (err instanceof CameraError)
+        setError(t(`camera.${err.kind === 'unknown' ? 'unsupported' : err.kind}`));
       else setError(t('camera.unsupported'));
       stop();
     }
@@ -224,11 +237,26 @@ export default function CameraPreview({ pageSize, onGesture }: Props) {
     const px = (x: number) => (mirrored ? 1 - x : x) * w;
     const py = (y: number) => y * h;
     const connections: [number, number][] = [
-      [0, 1], [1, 2], [2, 3], [3, 4],
-      [0, 5], [5, 6], [6, 7], [7, 8],
-      [5, 9], [9, 10], [10, 11], [11, 12],
-      [9, 13], [13, 14], [14, 15], [15, 16],
-      [13, 17], [17, 18], [18, 19], [19, 20],
+      [0, 1],
+      [1, 2],
+      [2, 3],
+      [3, 4],
+      [0, 5],
+      [5, 6],
+      [6, 7],
+      [7, 8],
+      [5, 9],
+      [9, 10],
+      [10, 11],
+      [11, 12],
+      [9, 13],
+      [13, 14],
+      [14, 15],
+      [15, 16],
+      [13, 17],
+      [17, 18],
+      [18, 19],
+      [19, 20],
       [0, 17],
     ];
     ctx.strokeStyle = '#22c55e';
@@ -269,14 +297,20 @@ export default function CameraPreview({ pageSize, onGesture }: Props) {
         )}
       </div>
       <div className="camera-controls">
-        <button type="button" onClick={() => (active ? stop() : void start())} aria-pressed={active}>
+        <button
+          type="button"
+          onClick={() => (active ? stop() : void start())}
+          aria-pressed={active}
+        >
           {active ? t('camera.stop') : t('camera.start')}
         </button>
         <label>
           {t('settings.camera')}
           <select
             value={settings.cameraId ?? ''}
-            onChange={(e) => useStore.getState().updateSettings({ cameraId: e.target.value || null })}
+            onChange={(e) =>
+              useStore.getState().updateSettings({ cameraId: e.target.value || null })
+            }
             aria-label={t('settings.camera')}
           >
             <option value="">{t('settings.auto')}</option>

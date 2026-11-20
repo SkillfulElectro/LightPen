@@ -226,7 +226,7 @@ export function makeSyntheticHand(pose: SyntheticHandPose = {}): Landmark[] {
     } else {
       lm[pip] = { x: base.x, y: base.y - hs * 0.25, z: 0 };
       lm[dip] = { x: base.x, y: base.y + hs * 0.05, z: 0 };
-      lm[tip] = { x: base.x, y: base.y + hs * 0.10, z: 0 };
+      lm[tip] = { x: base.x, y: base.y + hs * 0.1, z: 0 };
     }
   }
 

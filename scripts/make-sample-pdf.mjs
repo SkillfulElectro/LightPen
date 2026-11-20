@@ -15,7 +15,12 @@ const body = await doc.embedFont(StandardFonts.Helvetica);
 function page(title, lines) {
   const p = doc.addPage([612, 792]);
   p.drawText(title, { x: 56, y: 720, size: 28, font, color: rgb(0.1, 0.1, 0.2) });
-  p.drawLine({ start: { x: 56, y: 706 }, end: { x: 556, y: 706 }, thickness: 2, color: rgb(0.89, 0.11, 0.28) });
+  p.drawLine({
+    start: { x: 56, y: 706 },
+    end: { x: 556, y: 706 },
+    thickness: 2,
+    color: rgb(0.89, 0.11, 0.28),
+  });
   let y = 660;
   for (const line of lines) {
     p.drawText(line, { x: 56, y, size: 14, font: body, color: rgb(0.2, 0.2, 0.25) });

@@ -41,14 +41,25 @@ export function cameraToPage(
 }
 
 /** Map PDF points to canvas CSS pixels (top-left origin). */
-export function pageToCanvas(point: PdfPoint, page: PageSize, canvasW: number, canvasH: number): { x: number; y: number } {
+export function pageToCanvas(
+  point: PdfPoint,
+  page: PageSize,
+  canvasW: number,
+  canvasH: number,
+): { x: number; y: number } {
   const sx = page.width > 0 ? canvasW / page.width : 1;
   const sy = page.height > 0 ? canvasH / page.height : 1;
   return { x: point.x * sx, y: canvasH - point.y * sy };
 }
 
 /** Map canvas CSS pixels back to PDF points. */
-export function canvasToPage(x: number, y: number, page: PageSize, canvasW: number, canvasH: number): PdfPoint {
+export function canvasToPage(
+  x: number,
+  y: number,
+  page: PageSize,
+  canvasW: number,
+  canvasH: number,
+): PdfPoint {
   const sx = page.width > 0 ? canvasW / page.width : 1;
   const sy = page.height > 0 ? canvasH / page.height : 1;
   return { x: x / sx, y: (canvasH - y) / sy };

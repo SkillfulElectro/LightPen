@@ -16,6 +16,7 @@ export default function App() {
   const settings = useStore((s) => s.settings);
   const setPdf = useStore((s) => s.setPdf);
   const setTutorialOpen = useStore((s) => s.setTutorialOpen);
+  const setCheatSheetOpen = useStore((s) => s.setCheatSheetOpen);
   const currentPage = useStore((s) => s.currentPage);
 
   // First-run tutorial.
@@ -53,7 +54,12 @@ export default function App() {
   }, []);
 
   const onPdfLoaded = useCallback(
-    (name: string, bytes: Uint8Array, pageCount: number, pageSizes: { width: number; height: number }[]) => {
+    (
+      name: string,
+      bytes: Uint8Array,
+      pageCount: number,
+      pageSizes: { width: number; height: number }[],
+    ) => {
       setPdf({ name, bytes, pageCount, pageSizes });
     },
     [setPdf],
@@ -74,7 +80,7 @@ export default function App() {
     const state = useStore.getState();
     const doc = state.pdf;
     if (!doc) return;
-    const bytes = await buildAnnotatedPdf(doc.bytes, state.annotations.all, doc.pageSizes);
+    const bytes = await buildAnnotatedPdf(doc.bytes, state.annotations.all);
     const out = doc.name.replace(/\.pdf$/i, '') + '.annotated.pdf';
     await saveBytesAs(out, bytes);
   }, []);
@@ -101,7 +107,12 @@ export default function App() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement;
-      if (target.tagName === 'INPUT' || target.tagName === 'SELECT' || target.tagName === 'TEXTAREA') return;
+      if (
+        target.tagName === 'INPUT' ||
+        target.tagName === 'SELECT' ||
+        target.tagName === 'TEXTAREA'
+      )
+        return;
       const mod = e.ctrlKey || e.metaKey;
       const s = useStore.getState();
       if (mod && e.key.toLowerCase() === 'o') {
@@ -110,7 +121,10 @@ export default function App() {
       } else if (mod && e.key.toLowerCase() === 'z' && !e.shiftKey) {
         e.preventDefault();
         s.undo();
-      } else if (mod && (e.key.toLowerCase() === 'y' || (e.key.toLowerCase() === 'z' && e.shiftKey))) {
+      } else if (
+        mod &&
+        (e.key.toLowerCase() === 'y' || (e.key.toLowerCase() === 'z' && e.shiftKey))
+      ) {
         e.preventDefault();
         s.redo();
       } else if (mod && e.key === '+') {
@@ -139,7 +153,12 @@ export default function App() {
 
   return (
     <div className="app">
-      <Toolbar onOpen={() => window.dispatchEvent(new CustomEvent('lightpen:open-dialog'))} onSample={() => void loadSample()} onExportPdf={() => void exportPdf()} onExportPng={() => void exportPng()} />
+      <Toolbar
+        onOpen={() => window.dispatchEvent(new CustomEvent('lightpen:open-dialog'))}
+        onSample={() => void loadSample()}
+        onExportPdf={() => void exportPdf()}
+        onExportPng={() => void exportPng()}
+      />
       <main className="app-main">
         <section className="viewer-section" aria-label="PDF viewer">
           <PdfViewer pdfBytes={pdfBytes} pdfName={pdfName} onPdfLoaded={onPdfLoaded} />
@@ -147,6 +166,9 @@ export default function App() {
         <aside className="side-panel">
           <CameraPreview pageSize={pageSize} />
           <p className="side-hint">{t('app.tagline')}</p>
+          <button type="button" className="link-button" onClick={() => setCheatSheetOpen(true)}>
+            ✋ {t('toolbar.cheatSheet')}
+          </button>
         </aside>
       </main>
       <PermissionDialog />

@@ -20,6 +20,8 @@ describe('sanitizeSettings', () => {
   });
 
   it('rejects invalid calibration', () => {
-    expect(sanitizeSettings({ calibration: { x0: 0.8, y0: 0, x1: 0.2, y1: 1 } }).calibration).toBeNull();
+    expect(
+      sanitizeSettings({ calibration: { x0: 0.8, y0: 0, x1: 0.2, y1: 1 } }).calibration,
+    ).toBeNull();
   });
 });

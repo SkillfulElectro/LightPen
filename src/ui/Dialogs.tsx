@@ -3,7 +3,15 @@
 import { useTranslation } from 'react-i18next';
 import { useStore } from '../store/useStore';
 
-function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
+function Modal({
+  title,
+  onClose,
+  children,
+}: {
+  title: string;
+  onClose: () => void;
+  children: React.ReactNode;
+}) {
   return (
     <div className="modal-backdrop" role="presentation" onClick={onClose}>
       <div
@@ -99,7 +107,10 @@ export function SettingsDialog() {
       </label>
       <label>
         {t('settings.theme')}
-        <select value={settings.theme} onChange={(e) => update({ theme: e.target.value as 'light' | 'dark' | 'system' })}>
+        <select
+          value={settings.theme}
+          onChange={(e) => update({ theme: e.target.value as 'light' | 'dark' | 'system' })}
+        >
           <option value="system">{t('settings.system')}</option>
           <option value="light">{t('settings.light')}</option>
           <option value="dark">{t('settings.dark')}</option>
@@ -114,15 +125,27 @@ export function SettingsDialog() {
       <fieldset>
         <legend>{t('settings.gestures')}</legend>
         <label className="check">
-          <input type="checkbox" checked={settings.enablePageSwipe} onChange={(e) => update({ enablePageSwipe: e.target.checked })} />
+          <input
+            type="checkbox"
+            checked={settings.enablePageSwipe}
+            onChange={(e) => update({ enablePageSwipe: e.target.checked })}
+          />
           {t('settings.enableSwipe')}
         </label>
         <label className="check">
-          <input type="checkbox" checked={settings.enablePauseFist} onChange={(e) => update({ enablePauseFist: e.target.checked })} />
+          <input
+            type="checkbox"
+            checked={settings.enablePauseFist}
+            onChange={(e) => update({ enablePauseFist: e.target.checked })}
+          />
           {t('settings.enablePause')}
         </label>
         <label className="check">
-          <input type="checkbox" checked={settings.enableErase} onChange={(e) => update({ enableErase: e.target.checked })} />
+          <input
+            type="checkbox"
+            checked={settings.enableErase}
+            onChange={(e) => update({ enableErase: e.target.checked })}
+          />
           {t('settings.enableErase')}
         </label>
       </fieldset>

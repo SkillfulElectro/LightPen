@@ -91,7 +91,11 @@ export default function Toolbar({ onOpen, onSample, onExportPdf, onExportPng }: 
         <button type="button" onClick={redo} disabled={!canRedo} aria-label={t('toolbar.redo')}>
           ↪
         </button>
-        <button type="button" onClick={() => clearPage(currentPage)} aria-label={t('toolbar.clearPage')}>
+        <button
+          type="button"
+          onClick={() => clearPage(currentPage)}
+          aria-label={t('toolbar.clearPage')}
+        >
           🗑
         </button>
       </div>
@@ -126,17 +130,29 @@ export default function Toolbar({ onOpen, onSample, onExportPdf, onExportPng }: 
         />
       </div>
       <div className="toolbar-group" role="group" aria-label="Zoom">
-        <button type="button" onClick={() => setZoom(zoom - 0.25)} aria-label={t('toolbar.zoomOut')}>
+        <button
+          type="button"
+          onClick={() => setZoom(zoom - 0.25)}
+          aria-label={t('toolbar.zoomOut')}
+        >
           −
         </button>
         <span className="zoom-label">{Math.round(zoom * 100)}%</span>
         <button type="button" onClick={() => setZoom(zoom + 0.25)} aria-label={t('toolbar.zoomIn')}>
           +
         </button>
-        <button type="button" onClick={() => setFitMode('fit-width')} aria-label={t('toolbar.fitWidth')}>
+        <button
+          type="button"
+          onClick={() => setFitMode('fit-width')}
+          aria-label={t('toolbar.fitWidth')}
+        >
           {t('toolbar.fitWidth')}
         </button>
-        <button type="button" onClick={() => setFitMode('fit-page')} aria-label={t('toolbar.fitPage')}>
+        <button
+          type="button"
+          onClick={() => setFitMode('fit-page')}
+          aria-label={t('toolbar.fitPage')}
+        >
           {t('toolbar.fitPage')}
         </button>
       </div>
@@ -150,13 +166,25 @@ export default function Toolbar({ onOpen, onSample, onExportPdf, onExportPng }: 
         >
           📷 {t('toolbar.camera')}
         </button>
-        <button type="button" onClick={() => setTutorialOpen(true)} aria-label={t('toolbar.tutorial')}>
+        <button
+          type="button"
+          onClick={() => setTutorialOpen(true)}
+          aria-label={t('toolbar.tutorial')}
+        >
           🎓
         </button>
-        <button type="button" onClick={() => setSettingsOpen(true)} aria-label={t('toolbar.settings')}>
+        <button
+          type="button"
+          onClick={() => setSettingsOpen(true)}
+          aria-label={t('toolbar.settings')}
+        >
           ⚙
         </button>
-        <button type="button" onClick={() => setCheatSheetOpen(true)} aria-label={t('toolbar.cheatSheet')}>
+        <button
+          type="button"
+          onClick={() => setCheatSheetOpen(true)}
+          aria-label={t('toolbar.cheatSheet')}
+        >
           ✋
         </button>
         <button type="button" onClick={() => setShortcutsOpen(true)} aria-label={t('toolbar.help')}>
@@ -164,10 +192,20 @@ export default function Toolbar({ onOpen, onSample, onExportPdf, onExportPng }: 
         </button>
       </div>
       <div className="toolbar-group">
-        <button type="button" onClick={onExportPdf} disabled={!pdf} aria-label={t('toolbar.exportPdf')}>
+        <button
+          type="button"
+          onClick={onExportPdf}
+          disabled={!pdf}
+          aria-label={t('toolbar.exportPdf')}
+        >
           {t('toolbar.exportPdf')}
         </button>
-        <button type="button" onClick={onExportPng} disabled={!pdf} aria-label={t('toolbar.exportPng')}>
+        <button
+          type="button"
+          onClick={onExportPng}
+          disabled={!pdf}
+          aria-label={t('toolbar.exportPng')}
+        >
           {t('toolbar.exportPng')}
         </button>
       </div>

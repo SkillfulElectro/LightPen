@@ -36,7 +36,9 @@ export async function openPdfFile(): Promise<OpenedFile | null> {
     input.onchange = () => {
       const file = input.files?.[0];
       if (!file) return resolve(null);
-      void file.arrayBuffer().then((buf) => resolve({ name: file.name, bytes: new Uint8Array(buf) }));
+      void file
+        .arrayBuffer()
+        .then((buf) => resolve({ name: file.name, bytes: new Uint8Array(buf) }));
     };
     input.click();
   });

@@ -63,7 +63,12 @@ describe('GestureClassifier', () => {
     const c = new GestureClassifier(CFG);
     expect(c.classify(unPinched(), 0).kind).toBe('erase');
 
-    const two = makeSyntheticHand({ index: 'extended', middle: 'extended', ring: 'curled', pinky: 'curled' });
+    const two = makeSyntheticHand({
+      index: 'extended',
+      middle: 'extended',
+      ring: 'curled',
+      pinky: 'curled',
+    });
     expect(c.classify(two, 16).kind).toBe('erase');
 
     const disabled = new GestureClassifier({ ...CFG, enableErase: false });

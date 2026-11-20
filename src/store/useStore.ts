@@ -131,35 +131,55 @@ export const useStore = create<AppState>((set, get) => ({
   addStroke: (stroke) => {
     const { annotations } = get();
     annotations.addStroke(stroke);
-    set({ strokesVersion: get().strokesVersion + 1, canUndo: annotations.canUndo(), canRedo: annotations.canRedo() });
+    set({
+      strokesVersion: get().strokesVersion + 1,
+      canUndo: annotations.canUndo(),
+      canRedo: annotations.canRedo(),
+    });
     scheduleAutosave(get);
   },
   eraseAt: (page, point, radius) => {
     const { annotations } = get();
     const erased = annotations.eraseAt(page, point, radius);
     if (erased.length > 0) {
-      set({ strokesVersion: get().strokesVersion + 1, canUndo: annotations.canUndo(), canRedo: annotations.canRedo() });
+      set({
+        strokesVersion: get().strokesVersion + 1,
+        canUndo: annotations.canUndo(),
+        canRedo: annotations.canRedo(),
+      });
       scheduleAutosave(get);
     }
   },
   undo: () => {
     const { annotations } = get();
     if (annotations.undo()) {
-      set({ strokesVersion: get().strokesVersion + 1, canUndo: annotations.canUndo(), canRedo: annotations.canRedo() });
+      set({
+        strokesVersion: get().strokesVersion + 1,
+        canUndo: annotations.canUndo(),
+        canRedo: annotations.canRedo(),
+      });
       scheduleAutosave(get);
     }
   },
   redo: () => {
     const { annotations } = get();
     if (annotations.redo()) {
-      set({ strokesVersion: get().strokesVersion + 1, canUndo: annotations.canUndo(), canRedo: annotations.canRedo() });
+      set({
+        strokesVersion: get().strokesVersion + 1,
+        canUndo: annotations.canUndo(),
+        canRedo: annotations.canRedo(),
+      });
       scheduleAutosave(get);
     }
   },
   clearPage: (page) => {
     const { annotations } = get();
     annotations.clearPage(page);
-    set({ strokesVersion: get().strokesVersion + 1, canUndo: annotations.canUndo(), canRedo: annotations.canRedo() });
+    set({
+      strokesVersion: get().strokesVersion + 1,
+      canUndo: annotations.canUndo(),
+      canRedo: annotations.canRedo(),
+    });
     scheduleAutosave(get);
   },
 

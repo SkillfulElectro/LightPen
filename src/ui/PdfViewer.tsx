@@ -63,12 +63,15 @@ export default function PdfViewer({ pdfBytes, pdfName, onPdfLoaded }: Props) {
         const kind = (err as { kind?: PdfErrorKind })?.kind;
         if (kind === 'too-large') setError('too-large');
         else {
-          const { classifyPdfError } = { classifyPdfError: (e: unknown) => {
-            const name = (e as { name?: string })?.name ?? '';
-            const message = (e as { message?: string })?.message ?? '';
-            if (name === 'PasswordException' || /password/i.test(message)) return 'encrypted' as const;
-            return 'corrupt' as const;
-          } };
+          const { classifyPdfError } = {
+            classifyPdfError: (e: unknown) => {
+              const name = (e as { name?: string })?.name ?? '';
+              const message = (e as { message?: string })?.message ?? '';
+              if (name === 'PasswordException' || /password/i.test(message))
+                return 'encrypted' as const;
+              return 'corrupt' as const;
+            },
+          };
           setError(classifyPdfError(err));
         }
       });
@@ -159,7 +162,8 @@ export default function PdfViewer({ pdfBytes, pdfName, onPdfLoaded }: Props) {
       const p = pageToCanvas({ x: cursor.x, y: cursor.y }, pageSize, cssW, cssH);
       ctx.beginPath();
       ctx.arc(p.x, p.y, cursor.kind === 'pen-down' ? 5 : 8, 0, Math.PI * 2);
-      ctx.fillStyle = cursor.kind === 'pen-down' ? '#e11d48' : cursor.kind === 'erase' ? '#f59e0b' : '#3b82f6';
+      ctx.fillStyle =
+        cursor.kind === 'pen-down' ? '#e11d48' : cursor.kind === 'erase' ? '#f59e0b' : '#3b82f6';
       ctx.fill();
       ctx.lineWidth = 2;
       ctx.strokeStyle = '#fff';
@@ -175,7 +179,10 @@ export default function PdfViewer({ pdfBytes, pdfName, onPdfLoaded }: Props) {
     if (!rect) return null;
     const cssW = pageSize.width * scale;
     const cssH = pageSize.height * scale;
-    return clampToPage(canvasToPage(e.clientX - rect.left, e.clientY - rect.top, pageSize, cssW, cssH), pageSize);
+    return clampToPage(
+      canvasToPage(e.clientX - rect.left, e.clientY - rect.top, pageSize, cssW, cssH),
+      pageSize,
+    );
   };
 
   const onPointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
@@ -227,7 +234,9 @@ export default function PdfViewer({ pdfBytes, pdfName, onPdfLoaded }: Props) {
     void file.arrayBuffer().then((buf) => {
       const bytes = new Uint8Array(buf);
       // Handled by App via a custom event so the store stays the source of truth.
-      window.dispatchEvent(new CustomEvent('lightpen:file', { detail: { name: file.name, bytes } }));
+      window.dispatchEvent(
+        new CustomEvent('lightpen:file', { detail: { name: file.name, bytes } }),
+      );
     });
   };
 
@@ -283,7 +292,10 @@ export default function PdfViewer({ pdfBytes, pdfName, onPdfLoaded }: Props) {
       onDragOver={(e) => e.preventDefault()}
       onDrop={onDrop}
     >
-      <div className="page-stack" style={{ width: pageSize.width * scale, height: pageSize.height * scale }}>
+      <div
+        className="page-stack"
+        style={{ width: pageSize.width * scale, height: pageSize.height * scale }}
+      >
         <canvas ref={pageCanvasRef} className="page-canvas" aria-label="PDF page" />
         <canvas
           ref={inkCanvasRef}

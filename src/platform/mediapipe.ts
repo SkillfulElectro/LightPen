@@ -51,7 +51,11 @@ export function getHandLandmarker(): Promise<HandLandmarker> {
 }
 
 /** Detect hands in the current video frame. Returns null when no hand. */
-export function detectHand(landmarker: HandLandmarker, video: HTMLVideoElement, nowMs: number): HandResult | null {
+export function detectHand(
+  landmarker: HandLandmarker,
+  video: HTMLVideoElement,
+  nowMs: number,
+): HandResult | null {
   if (video.readyState < 2) return null;
   const result = landmarker.detectForVideo(video, nowMs);
   const landmarks = result.landmarks?.[0];

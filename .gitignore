@@ -12,3 +12,16 @@ public/models/hand_landmarker.task
 .env
 .env.*
 !.env.example
+
+# Signing material — never commit
+*.keystore
+*.jks
+*.p12
+*.pfx
+*.p8
+android-keystore.properties
+
+# Playwright / build output
+dist-android/
+dist-ios/
+renamed/

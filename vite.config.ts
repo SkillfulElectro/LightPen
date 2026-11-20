@@ -20,8 +20,8 @@ export default defineConfig({
     rollupOptions: {
       output: {
         manualChunks: {
-          'pdfjs': ['pdfjs-dist'],
-          'mediapipe': ['@mediapipe/tasks-vision'],
+          pdfjs: ['pdfjs-dist'],
+          mediapipe: ['@mediapipe/tasks-vision'],
         },
       },
     },

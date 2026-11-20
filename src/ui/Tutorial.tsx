@@ -19,7 +19,9 @@ export default function Tutorial() {
   const setOpen = useStore((s) => s.setTutorialOpen);
   const [step, setStep] = useState(0);
   const [done, setDone] = useState<Set<Exercise>>(new Set());
-  const [calRect, setCalRect] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
+  const [calRect, setCalRect] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(
+    null,
+  );
   const sandboxRef = useRef<HTMLCanvasElement>(null);
   const strokesRef = useRef<{ pts: { x: number; y: number }[]; color: string }[]>([]);
   const drawingRef = useRef(false);
@@ -134,14 +136,21 @@ export default function Tutorial() {
 
   return (
     <div className="modal-backdrop" role="presentation">
-      <div className="modal tutorial-modal" role="dialog" aria-modal="true" aria-label={t('tutorial.title')}>
+      <div
+        className="modal tutorial-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-label={t('tutorial.title')}
+      >
         <div className="modal-header">
           <h2>{t('tutorial.title')}</h2>
           <button type="button" onClick={() => setOpen(false)} aria-label={t('tutorial.skip')}>
             ✕
           </button>
         </div>
-        <p className="step-label">{t('tutorial.stepOf', { current: step + 1, total: TOTAL_STEPS })}</p>
+        <p className="step-label">
+          {t('tutorial.stepOf', { current: step + 1, total: TOTAL_STEPS })}
+        </p>
         <div className="modal-body">
           {step === 0 && (
             <>
@@ -159,7 +168,11 @@ export default function Tutorial() {
           )}
           {isPractice && exercise && (
             <>
-              <p>{t('tutorial.practice', { exercise: t(`tutorial.ex${exercise.charAt(0).toUpperCase()}${exercise.slice(1)}`) })}</p>
+              <p>
+                {t('tutorial.practice', {
+                  exercise: t(`tutorial.ex${exercise.charAt(0).toUpperCase()}${exercise.slice(1)}`),
+                })}
+              </p>
               <div className="sandbox-tools">
                 <button
                   type="button"
@@ -190,7 +203,8 @@ export default function Tutorial() {
                 aria-label="Practice area"
               />
               <p className="sandbox-hint">
-                {t('gestures.penDown')} · {t('gestures.erase')} · {t('gestures.swipe')} · {t('gestures.pause')}
+                {t('gestures.penDown')} · {t('gestures.erase')} · {t('gestures.swipe')} ·{' '}
+                {t('gestures.pause')}
               </p>
             </>
           )}
