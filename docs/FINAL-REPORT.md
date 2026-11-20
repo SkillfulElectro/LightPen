@@ -12,10 +12,11 @@ development environment.
 | Formatting              | `npx prettier --check .`                                     | ✅ clean                                                                          |
 | Lint (zero warnings)    | `npx eslint . --max-warnings 0`                              | ✅ clean                                                                          |
 | TypeScript strict       | `npx tsc --noEmit`                                           | ✅ clean                                                                          |
-| Unit tests              | `npx vitest run`                                             | ✅ 140 tests in 17 files                                                          |
+| Unit tests              | `npx vitest run`                                             | ✅ 144 tests in 18 files                                                          |
 | Core coverage           | `npx vitest run --coverage`                                  | ✅ 99.2 % statements, 95.5 % branches, 96.8 % functions (threshold 80 %)          |
 | Web production build    | `npm run build`                                              | ✅ pdf.js/MediaPipe split into their own chunks                                   |
-| Workflow syntax         | `actionlint` (v1.7.7) on `ci.yml` + `release.yml`            | ✅ both OK                                                                        |
+| Workflow syntax         | `actionlint` (WASM) on `ci.yml` + `release.yml`              | ✅ both OK                                                                        |
+| Workflow inputs         | `src/core/ciEnv.test.ts`                                     | ✅ every Rust toolchain step passes a version matching `rust-toolchain.toml`      |
 | Annotated PDF export    | exported sample rendered with pypdfium2, parsed with pypdf   | ✅ ink present, correctly placed, stroked (not filled)                            |
 | Rotated-page mapping    | matrices compared with pdf.js `getViewport` for 0/90/180/270 | ✅ exact to 5 decimals; exports rendered correctly                                |
 | App renders in jsdom    | `src/ui/app.smoke.test.tsx`, `src/ui/a11y.test.tsx`          | ✅ toolbar, viewer, dialogs, tutorial sandbox, keyboard shortcuts, focus handling |

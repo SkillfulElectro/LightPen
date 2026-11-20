@@ -43,6 +43,10 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   NODE_VERSION: '20'
+  # Must match `channel` in rust-toolchain.toml; src/core/ciEnv.test.ts enforces
+  # it. dtolnay/rust-toolchain has no default for this input, so a pinned action
+  # reference must pass it explicitly.
+  RUST_TOOLCHAIN: '1.82.0'
 
 jobs:
   # ---------------------------------------------------------------- prepare --
@@ -169,8 +173,9 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
 
-      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1 (stable)
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
         with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
           targets: ${{ matrix.target == 'universal-apple-darwin' && 'aarch64-apple-darwin,x86_64-apple-darwin' || matrix.target }}
 
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
@@ -239,10 +244,17 @@ jobs:
 
       - name: Upload renamed artifacts (Windows)
         if: matrix.os == 'windows-latest'
+        shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ needs.prepare.outputs.tag }}
-        run: gh release upload "$TAG" (Get-ChildItem renamed | ForEach-Object { $_.FullName }) --clobber --repo ${{ github.repository }}
+        # `env:` values are environment variables in PowerShell, so they must be
+        # read as $env:TAG — a bare $TAG is an unset PS variable (empty string).
+        run: |
+          $files = Get-ChildItem -Path renamed -File | ForEach-Object { $_.FullName }
+          if (-not $files) { throw "no artifacts were produced to upload" }
+          gh release upload "$env:TAG" @files --clobber --repo "${{ github.repository }}"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Job summary
         shell: bash
@@ -281,8 +293,9 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
 
-      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1 (stable)
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
         with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
           targets: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
 
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
@@ -381,8 +394,9 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
 
-      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1 (stable)
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
         with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
           targets: aarch64-apple-ios,aarch64-apple-ios-sim,x86_64-apple-ios
 
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3

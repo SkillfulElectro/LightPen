@@ -115,12 +115,21 @@ Honest status of things that could **not** be executed in the environment this
 project was developed in. Treat these as “written and reviewed” rather than
 “proven”:
 
-- **`release.yml` end-to-end run.** The workflow passes `actionlint` (v1.7.7,
-  via the `actionlint` npm/WASM package) and its logic was reviewed, but it has
-  never been run on GitHub Actions from this environment. Windows/macOS/Android/iOS
-  builds, `tauri-action` uploads, `gh release` calls and artefact renaming are
-  unproven. The first run should be a `draft=true` dry run with
-  `build_android=false`, `build_ios=false`.
+- **`release.yml` end-to-end run.** The workflow passes `actionlint` and its
+  logic was reviewed, but it has never completed a run on GitHub Actions.
+  Windows/macOS/Android/iOS builds, `tauri-action` uploads, `gh release` calls
+  and artefact renaming are unproven. The first run should be a `draft=true` dry
+  run with `build_android=false`, `build_ios=false`.
+
+  The first real Windows run failed at the toolchain step: `toolchain` is a
+  **required** input of `dtolnay/rust-toolchain`, and pinning the action to a
+  commit SHA drops the `@stable` ref that used to supply it implicitly. Every
+  step now passes `toolchain: ${{ env.RUST_TOOLCHAIN }}`, and
+  `src/core/ciEnv.test.ts` fails the build if a workflow step omits it, if that
+  value drifts from `rust-toolchain.toml`, if a PowerShell step reads an `env:`
+  value as a bare `$NAME`, or if `cargo audit` runs before `Cargo.lock` exists.
+  These are workflow-level bug classes that `actionlint` does not model.
+
 - **All Rust compilation, `cargo fmt`, `cargo clippy`, `cargo test`.** No Rust
   toolchain was available and `static.rust-lang.org` was unreachable, so
   `src-tauri/` was never compiled. Expect to fix trivial compile issues on the
