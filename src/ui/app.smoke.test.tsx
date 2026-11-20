@@ -1,8 +1,10 @@
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
+import { readFileSync } from 'node:fs';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { initI18n } from '../i18n';
 
-// pdf.js needs a worker; stub the hook's heavy parts for the smoke test.
+// The bundler worker URL import is Vite-only; the test setup gives pdf.js the
+// Node build, so a placeholder URL is enough here.
 vi.mock('pdfjs-dist/build/pdf.worker.min.mjs?url', () => ({ default: 'worker.js' }));
 
 beforeAll(async () => {
@@ -141,6 +143,76 @@ describe('corrupt PDF handling', () => {
     );
     const alert = await screen.findByRole('alert', undefined, { timeout: 5000 });
     expect(alert.textContent).toMatch(/could not be opened|could not be read as a PDF/i);
+  });
+});
+
+// The sample PDF is served over HTTP in the app; jsdom has no network, so the
+// real bytes are dispatched through the same event the drag-and-drop path uses.
+async function openSample() {
+  const { default: App } = await import('../App');
+  render(<App />);
+  const bytes = new Uint8Array(readFileSync('public/sample.pdf'));
+  await act(async () => {
+    window.dispatchEvent(
+      new CustomEvent('lightpen:file', { detail: { name: 'sample.pdf', bytes } }),
+    );
+  });
+  await screen.findByLabelText('Ink layer', undefined, { timeout: 5000 });
+  return document.querySelector('.viewer-scroll') as HTMLElement;
+}
+
+describe('PDF flow', () => {
+  it('renders a real 3-page PDF and publishes its page size', async () => {
+    const { useStore } = await import('../store/useStore');
+    await openSample();
+    expect(useStore.getState().pdf?.pageCount).toBe(3);
+    expect(useStore.getState().pdf?.name).toBe('sample.pdf');
+    expect(useStore.getState().currentPageSize).toEqual({ width: 612, height: 792 });
+    expect(screen.getByText('Page 1 of 3')).toBeTruthy();
+  });
+
+  it('navigates pages and refuses to go before the first page', async () => {
+    const { useStore } = await import('../store/useStore');
+    await openSample();
+    expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Previous page' }).disabled).toBe(
+      true,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Next page' }));
+    await waitFor(() => expect(useStore.getState().currentPage).toBe(1));
+    fireEvent.click(screen.getByRole('button', { name: 'Previous page' }));
+    await waitFor(() => expect(useStore.getState().currentPage).toBe(0));
+  });
+});
+
+describe('zoom', () => {
+  it('ctrl + wheel zooms around the pointer and switches to manual fit', async () => {
+    const { useStore } = await import('../store/useStore');
+    const viewer = await openSample();
+    const before = useStore.getState().zoom;
+    fireEvent.wheel(viewer, { deltaY: -120, ctrlKey: true, clientX: 100, clientY: 100 });
+    await waitFor(() => expect(useStore.getState().zoom).toBeGreaterThan(before));
+    expect(useStore.getState().fitMode).toBe('manual');
+    const zoomed = useStore.getState().zoom;
+    fireEvent.wheel(viewer, { deltaY: 120, ctrlKey: true, clientX: 100, clientY: 100 });
+    await waitFor(() => expect(useStore.getState().zoom).toBeLessThan(zoomed));
+  });
+
+  it('clamps zoom to the supported range', async () => {
+    const { useStore } = await import('../store/useStore');
+    const viewer = await openSample();
+    const big = { deltaY: -100000, ctrlKey: true, clientX: 0, clientY: 0 };
+    fireEvent.wheel(viewer, big);
+    fireEvent.wheel(viewer, big);
+    fireEvent.wheel(viewer, big);
+    await waitFor(() => expect(useStore.getState().zoom).toBe(4));
+  });
+
+  it('ignores a plain wheel event (normal page scrolling)', async () => {
+    const { useStore } = await import('../store/useStore');
+    const viewer = await openSample();
+    const before = useStore.getState().zoom;
+    fireEvent.wheel(viewer, { deltaY: -300, clientX: 10, clientY: 10 });
+    expect(useStore.getState().zoom).toBe(before);
   });
 });
 

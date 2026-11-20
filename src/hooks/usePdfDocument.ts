@@ -10,6 +10,31 @@ import type { PageSize } from '../core/types';
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
 
+/**
+ * pdf.js API surface used here. Injectable so tests (and future embedders) can
+ * supply a build that runs without a module worker — under Node the bundler
+ * worker cannot be imported, so tests pass `pdfjs-dist/legacy/build/pdf.mjs`.
+ */
+export type PdfJsApi = Pick<typeof pdfjs, 'getDocument'>;
+
+type PdfModule = typeof pdfjs & { default?: typeof pdfjs };
+
+/** Resolve a dynamically imported pdf.js module (ESM namespace or default). */
+export function resolveApi(mod: PdfModule | undefined): PdfJsApi {
+  return (mod?.getDocument ? mod : (mod?.default ?? pdfjs)) as PdfJsApi;
+}
+
+/** Set once at start-up (or by tests) to override the pdf.js implementation. */
+export function setPdfJsApi(api: PdfJsApi): void {
+  activeApi = api;
+}
+
+let activeApi: PdfJsApi | null = null;
+
+function api(): PdfJsApi {
+  return activeApi ?? pdfjs;
+}
+
 export type PdfErrorKind = 'encrypted' | 'corrupt' | 'too-large' | 'unknown';
 
 /** i18n key (under `viewer.`) for each error kind. Explicit, so a rename of one
@@ -43,7 +68,7 @@ export async function loadPdf(bytes: Uint8Array): Promise<LoadedPdf> {
     err.kind = 'too-large';
     throw err;
   }
-  const doc = await pdfjs.getDocument({ data: bytes.slice(), isEvalSupported: false }).promise;
+  const doc = await api().getDocument({ data: bytes.slice(), isEvalSupported: false }).promise;
   // Page sizes are read lazily (getPageGeometry) so large documents open fast;
   // only the first page is probed here, as a sensible initial default.
   const pageSizes: PageSize[] = new Array<PageSize>(doc.numPages).fill({

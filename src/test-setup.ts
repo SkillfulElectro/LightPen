@@ -2,6 +2,13 @@
 import { afterEach, vi } from 'vitest';
 import { cleanup } from '@testing-library/react';
 
+// pdf.js: the bundler-style fake worker cannot be imported under Node, so the
+// hook is given the Node-compatible legacy build instead.
+await import('pdfjs-dist/legacy/build/pdf.mjs').then(async (legacy) => {
+  const { setPdfJsApi } = await import('./hooks/usePdfDocument');
+  setPdfJsApi(legacy as unknown as Parameters<typeof setPdfJsApi>[0]);
+});
+
 if (!window.matchMedia) {
   window.matchMedia = ((query: string) => ({
     matches: false,

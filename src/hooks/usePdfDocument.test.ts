@@ -1,5 +1,13 @@
 import { describe, expect, it, vi } from 'vitest';
-import { classifyPdfError, getPageGeometry, loadPdf, type PageGeometry } from './usePdfDocument';
+import {
+  classifyPdfError,
+  getPageGeometry,
+  loadPdf,
+  resolveApi,
+  setPdfJsApi,
+  type PageGeometry,
+  type PdfJsApi,
+} from './usePdfDocument';
 
 describe('classifyPdfError', () => {
   it('recognises password-protected documents', () => {
@@ -52,5 +60,39 @@ describe('loadPdf', () => {
   it('rejects documents above the size cap before parsing', async () => {
     const huge = new Uint8Array(201 * 1024 * 1024);
     await expect(loadPdf(huge)).rejects.toMatchObject({ kind: 'too-large' });
+  });
+});
+
+describe('injectable pdf.js API', () => {
+  const fakeDoc = {
+    numPages: 2,
+    getPage: vi.fn(async () => ({
+      rotate: 0,
+      cleanup: vi.fn(),
+      getViewport: () => ({ width: 300, height: 400 }),
+    })),
+  };
+
+  it('routes loadPdf through the injected implementation and restores it', async () => {
+    const legacy = await import('pdfjs-dist/legacy/build/pdf.mjs');
+    const getDocument = vi.fn(() => ({ promise: Promise.resolve(fakeDoc) }));
+    setPdfJsApi({ getDocument } as unknown as PdfJsApi);
+    try {
+      const loaded = await loadPdf(new Uint8Array([1, 2, 3]));
+      expect(getDocument).toHaveBeenCalledTimes(1);
+      expect(loaded.pageCount).toBe(2);
+      expect(loaded.pageSizes[0]).toEqual({ width: 300, height: 400 });
+      // Later pages keep the Letter default until they are visited.
+      expect(loaded.pageSizes[1]).toEqual({ width: 612, height: 792 });
+    } finally {
+      setPdfJsApi(legacy as unknown as PdfJsApi);
+    }
+  });
+
+  it('resolves an ES module namespace or a default export', () => {
+    const api = { getDocument: vi.fn() } as unknown as PdfJsApi;
+    expect(resolveApi(api as never)).toBe(api);
+    expect(resolveApi({ default: api } as never)).toBe(api);
+    expect(resolveApi(undefined)).toBeTruthy();
   });
 });

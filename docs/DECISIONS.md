@@ -204,3 +204,15 @@ covered by Playwright and manual checks.
 
 **Why.** UI coverage numbers are easy to inflate and give false confidence; the
 logic that can break silently is all in `core`.
+
+## ADR-019 — pdf.js is injected into the hook, not imported directly by tests
+
+**Decision.** `usePdfDocument` keeps importing the bundler build in production but
+exposes `setPdfJsApi` / `resolveApi`. The Vitest setup injects
+`pdfjs-dist/legacy/build/pdf.mjs`, which runs in Node without a module worker.
+
+**Why.** The bundler build spawns a "fake worker" that resolves
+`pdf.worker.min.mjs` through an import the Node/jsdom loader cannot resolve, which
+made every component test that touches a PDF fail. The legacy build parses real
+PDFs under jsdom, so tests now exercise the genuine load/render path (page count,
+page size, navigation, zoom) against `public/sample.pdf` instead of a mock.
