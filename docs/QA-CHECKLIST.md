@@ -26,7 +26,7 @@ need a human, a real camera and real hardware. Copy this list into the release P
 ## Android
 
 - [ ] `npm run tauri android build` installs and launches.
-- [ ] Camera permission dialog (WebView `PermissionRequest`) appears and is honoured.
+- [ ] **Apply the Kotlin grant from [`MOBILE.md`](MOBILE.md) after `tauri android init`**, then verify the WebView `PermissionRequest` dialog appears and is honoured.
 - [ ] Back gesture/button does not leave a dangling camera session.
 - [ ] Layout is usable in portrait and landscape; the side panel stacks under the viewer.
 - [ ] Touch drawing works; pinch-zoom on the viewer does not fight page gestures.
