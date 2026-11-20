@@ -79,6 +79,7 @@
     "placementDistanceArt": "A camera on the left, a dashed line to a person on the right, showing an arm's length of distance.",
     "calibration": "Drag a box over the area where you will move your hand — that box becomes the page.",
     "calibrationHint": "Comfort is more important than size: pick a box you can reach without stretching. You can redo this later from the tutorial.",
+    "calibrationUnset": "Nothing drawn yet — press Next to use the whole camera frame.",
     "practice": "Practice: {{exercise}}",
     "exHover": "Point your index finger at the page (hover).",
     "exWrite": "Pinch thumb and index together to draw a line.",

@@ -214,6 +214,7 @@ export default function Tutorial() {
               <p>{t('tutorial.calibration')}</p>
               <p className="sandbox-hint">{t('tutorial.calibrationHint')}</p>
               <CalibrationBox rect={calRect} onChange={setCalRect} />
+              {!calRect && <p className="sandbox-hint">{t('tutorial.calibrationUnset')}</p>}
             </>
           )}
           {isPractice && exercise && (

@@ -115,3 +115,17 @@ describe('settings completeness', () => {
     );
   });
 });
+
+describe('calibration step', () => {
+  it('lets the user skip the rectangle (whole frame is a valid mapping)', async () => {
+    const { useStore } = await import('../store/useStore');
+    const { default: App } = await import('../App');
+    render(<App />);
+    useStore.setState({ tutorialOpen: true, tutorialStartStep: 3 });
+    await screen.findByText('Step 4 of 10');
+    expect(screen.getByText(/Nothing drawn yet/)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+    await waitFor(() => expect(useStore.getState().settings.calibration).toBeNull());
+    expect(await screen.findByText('Step 5 of 10')).toBeTruthy();
+  });
+});
