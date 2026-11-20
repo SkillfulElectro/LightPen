@@ -9,8 +9,10 @@ import { expect, test } from '@playwright/test';
  */
 
 test.beforeEach(async ({ page }) => {
+  // Every test gets a fresh browser context, so localStorage is already empty —
+  // clearing it here (this script runs on *every* navigation, reloads included)
+  // used to wipe the sidecar an earlier step in the same test had just written.
   await page.addInitScript(() => {
-    localStorage.clear();
     localStorage.setItem('lightpen:tutorial-seen', '1');
   });
   await page.goto('/');
@@ -23,8 +25,11 @@ async function openSample(page: import('@playwright/test').Page) {
 }
 
 test('loads the app shell with the empty state', async ({ page }) => {
-  await expect(page.getByRole('button', { name: 'Open PDF' })).toBeVisible();
-  await expect(page.getByText('Drop a PDF here')).toBeVisible();
+  // Scoped to the viewer: the toolbar has an "Open PDF" button too, and
+  // Playwright's `name` is a substring match, so an unscoped query is ambiguous.
+  const viewer = page.getByRole('region', { name: 'PDF viewer' });
+  await expect(viewer.getByRole('button', { name: 'Open PDF', exact: true })).toBeVisible();
+  await expect(viewer.getByText('Drop a PDF here')).toBeVisible();
 });
 
 test('opens the sample PDF and navigates pages', async ({ page }) => {
@@ -100,7 +105,12 @@ test('tutorial opens from the toolbar and the practice sandbox works', async ({ 
   await page.getByRole('button', { name: 'Tutorial' }).click();
   const dialog = page.getByRole('dialog', { name: 'Welcome to LightPen' });
   await expect(dialog).toBeVisible();
-  for (let i = 0; i < 4; i++) await page.getByRole('button', { name: 'Next' }).click();
+  // `exact` matters: without it this also matches the viewer's "Next page".
+  // (The jsdom test of the same flow needs no equivalent — Testing Library's
+  // `name` is exact by default, which is why only this suite caught the clash.)
+  for (let i = 0; i < 4; i++) {
+    await page.getByRole('button', { name: 'Next', exact: true }).click();
+  }
 
   const sandbox = page.getByLabel('Practice area');
   await expect(sandbox).toBeVisible();
@@ -200,16 +210,24 @@ test('sidecar autosave restores ink when the same PDF is reopened', async ({ pag
   expect(stored).toBe(true);
   await page.reload();
   await openSample(page);
+  // Undo history is not persisted, so this passes straight away and is not a
+  // signal that the sidecar has been read back yet: the restore is async, and
+  // sampling the canvas once raced it. Poll instead.
   await expect(page.getByRole('button', { name: 'Undo' })).toBeDisabled();
-  const inked = await page.locator('.ink-canvas').evaluate((el) => {
-    const canvas = el as HTMLCanvasElement;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return false;
-    const { data } = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    for (let i = 3; i < data.length; i += 4) if (data[i] !== 0) return true;
-    return false;
-  });
-  expect(inked).toBe(true);
+  await expect
+    .poll(
+      () =>
+        page.locator('.ink-canvas').evaluate((el) => {
+          const canvas = el as HTMLCanvasElement;
+          const ctx = canvas.getContext('2d');
+          if (!ctx || canvas.width === 0) return false;
+          const { data } = ctx.getImageData(0, 0, canvas.width, canvas.height);
+          for (let i = 3; i < data.length; i += 4) if (data[i] !== 0) return true;
+          return false;
+        }),
+      { timeout: 10_000 },
+    )
+    .toBe(true);
 });
 
 test('ink follows the document content, not its file name (ADR-020)', async ({ page }) => {

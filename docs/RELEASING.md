@@ -34,14 +34,14 @@ Releases are **manual and tag-driven**. Nothing is published on push.
 
 3. The workflow:
 
-   | Job             | What it does                                                                                                                                                                                                                                |
-   | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-   | `prepare`       | validates the tag, checks version sync, creates the release if missing, exports `release_id` / `upload_url`                                                                                                                                 |
-   | `build-desktop` | matrix: `windows-latest` (x64 + arm64), `macos-latest` (universal, only when `build_macos`), `ubuntu-22.04`; `tauri-apps/tauri-action` uploads to the existing release, then artifacts are renamed to `LightPen_<version>_<platform>.<ext>` |
-   | `build-android` | JDK 17 + Android SDK/NDK + four Rust Android targets, `tauri android build --apk --aab`, `gh release upload --clobber`                                                                                                                      |
-   | `build-ios`     | `macos-latest`, optional keychain import, `tauri ios build`, uploads `.ipa` / `.app.tar.gz`                                                                                                                                                 |
-   | `verify`        | lists release assets, fails if an expected artifact is missing, generates and uploads `SHA256SUMS.txt`, writes a summary table                                                                                                              |
-   | `publish`       | un-drafts the release when `draft=false` and verification passed                                                                                                                                                                            |
+   | Job             | What it does                                                                                                                                                                                                                                                                                             |
+   | --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+   | `prepare`       | validates the tag, checks version sync, creates the release if missing, exports `release_id` / `upload_url`                                                                                                                                                                                              |
+   | `build-desktop` | matrix: `windows-latest` (x64 + arm64), `macos-latest` (universal, only when `build_macos`), `ubuntu-22.04`; `tauri-apps/tauri-action` builds (it is given no `releaseId`, so it does not upload), bundles are renamed to `LightPen_<version>_<platform>.<ext>` and uploaded once by `gh release upload` |
+   | `build-android` | JDK 17 + Android SDK/NDK + four Rust Android targets, `tauri android build --apk --aab`, `gh release upload --clobber`                                                                                                                                                                                   |
+   | `build-ios`     | `macos-latest`, optional keychain import, `tauri ios build`, uploads `.ipa` / `.app.tar.gz`                                                                                                                                                                                                              |
+   | `verify`        | lists release assets, fails if an artifact expected **for the selected platforms** is missing, generates and uploads `SHA256SUMS.txt`, writes a summary table                                                                                                                                            |
+   | `publish`       | un-drafts the release when `draft=false` and verification passed                                                                                                                                                                                                                                         |
 
    Every job has `timeout-minutes`, actions are pinned by full commit SHA with a
    version comment, caches cover npm / cargo / gradle (via
@@ -61,6 +61,14 @@ LightPen_<version>_android_universal.apk / .aab
 LightPen_<version>_ios_arm64.ipa
 SHA256SUMS.txt
 ```
+
+These are the only names a release should contain. If you also see
+`LightPen_<version>_amd64.AppImage`, `LightPen-<version>-1.x86_64.rpm`,
+`LightPen_<version>_x64-setup.exe` or similar, something else is uploading the
+bundles under Tauri's default names — `tauri-action` does that whenever it is
+given a `releaseId`. The `verify` job prints a `::warning::` listing any asset
+that does not match the scheme above, so a duplicate or stale upload is visible
+in the run summary instead of quietly shipping twice.
 
 ## Secrets
 
@@ -109,6 +117,7 @@ absent.
 
 ```bash
 npm run lint && npm run typecheck && npm run test:coverage
+npm audit --audit-level=high
 npm run test:e2e
 cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
 cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
@@ -124,19 +133,51 @@ Honest status of things that could **not** be executed in the environment this
 project was developed in. Treat these as “written and reviewed” rather than
 “proven”:
 
-- **`release.yml` end-to-end run.** The workflow passes `actionlint` and its
-  logic was reviewed, but it has never completed a run on GitHub Actions.
-  Windows/Android/iOS/macOS bundles, `tauri-action` uploads, `gh release` calls
-  and artefact renaming are unproven. The first run should be a `draft=true` dry
-  run with `build_macos=false`, `build_android=false`, `build_ios=false`.
+- **`cargo audit` failed before auditing anything.** The step installed
+  `cargo-audit@^0.21`, _downgrading_ the 0.23 the runner image already ships, and
+  0.21's advisory parser cannot read CVSS 4.0: it aborted with `unsupported CVSS
+version: 4.0` while loading `RUSTSEC-2026-0211` from the database. Nothing is
+  pinned now — the bundled tool is used, with `cargo install` only as a
+  fallback — and `src/core/ciEnv.test.ts` fails if a version pin comes back.
 
-  The first real run then failed at two points, both now fixed and guarded:
+- **clippy had never actually run** (fmt failed first). Its first run found two
+  `-D warnings` errors in `lib.rs`: an unused `event` parameter on
+  `app.run(...)`, whose body only exists inside
+  `#[cfg(any(target_os = "macos", target_os = "ios"))]`, and a redundant
+  `.menu(|app| build_menu(app))` closure. Both fixed.
+
+- **The `actionlint` CI job only ever passed locally by accident.** Local checks
+  used the WASM build of actionlint, which cannot spawn `shellcheck`; CI's native
+  binary runs it on every `run:` block at _all_ severities. Five warnings were
+  therefore invisible locally (unquoted `find` loop, a `[[ "${{ matrix.os }}" ==
+macos-* ]]` pattern that can never match once actionlint substitutes the
+  expression with underscores, an unquoted command substitution, and an
+  `ls | grep`). All five are fixed and the check is now reproduced locally with
+  shellcheck directly.
+
+- **`release.yml` end-to-end run.** Every CI job is green, `actionlint` included,
+  and the first real run did build and upload the unsigned Windows and Linux
+  bundles — but it never reached a green `verify`, so macOS/iOS signing and the
+  un-drafting `publish` job remain unproven. Start with a `draft=true` run with
+  `build_macos=false`, `build_android=false`, `build_ios=false`.
+
+  The runs so far failed at the points below, all now fixed and guarded by
+  `src/core/tauriConfig.test.ts` / `src/core/ciEnv.test.ts`:
 
   - **`bundle > targets` was schema-invalid.** It listed `apk`, which is not a
     Tauri 2 bundle type (Android is built by `tauri android build`), so
     `tauri build` refused to start on _every_ platform. `src/core/tauriConfig.test.ts`
     now rejects unknown targets and unknown `tauri-action` inputs; the config
     validates against Tauri's published schema.
+  - **Every artifact was uploaded twice.** `tauri-action` was given a
+    `releaseId`, so it uploaded the bundles under their default names
+    (`LightPen_0.1.0_amd64.AppImage`, `LightPen_0.1.0_x64-setup.exe`, …) and the
+    workflow then uploaded renamed copies too. The action now only builds; the
+    renamed set is published once by `gh release upload`.
+  - **`verify` demanded a macOS artifact even with `build_macos` off.** Its
+    expectation list hardcoded `LightPen_<version>_macos-universal`, so a correct
+    Linux/Windows release failed at the last step. Every optional platform is now
+    gated on the same input that decides whether it is built.
   - **The macOS leg failed with `SecKeychainItemImport: Unable to decode the
 provided data`.** Not a bad certificate: no certificate. The build step
     forwarded `APPLE_CERTIFICATE`/`APPLE_CERTIFICATE_PASSWORD` (plus the Windows

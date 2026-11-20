@@ -271,8 +271,8 @@ describe('release matrix and optional signing', () => {
     // defines the variable; tauri then tries to import "" as a p12 certificate.
     const text = release();
     const build = text.slice(
-      text.indexOf('name: Build bundles'),
-      text.indexOf('Normalise artifact names'),
+      text.indexOf('name: Build the app'),
+      text.indexOf('name: Normalise artifact names'),
     );
     expect(build).not.toMatch(/secrets\.(APPLE|WINDOWS)_/);
     expect(build).toContain('GITHUB_TOKEN');
@@ -282,7 +282,7 @@ describe('release matrix and optional signing', () => {
     const text = release();
     const step = text.slice(
       text.indexOf('name: Prepare optional signing'),
-      text.indexOf('name: Build bundles'),
+      text.indexOf('name: Build the app'),
     );
     expect(step).toContain('export_optional');
     expect(step).toContain('if [[ -n "${2:-}" ]]');
@@ -293,5 +293,100 @@ describe('release matrix and optional signing', () => {
     const text = release();
     expect(text).toContain('APPLE_CERTIFICATE is set but APPLE_CERTIFICATE_PASSWORD is not');
     expect(text).toContain('WINDOWS_CERTIFICATE is set but WINDOWS_CERTIFICATE_PASSWORD is not');
+  });
+});
+
+describe('release verification expectations', () => {
+  const release = () => read('.github/workflows/release.yml');
+
+  /** Platform prefixes the verify step will demand, given the inputs. */
+  function expected(inputs: { macos: boolean; android: boolean; ios: boolean }): string[] {
+    const text = release();
+    const start = text.indexOf('expected=(');
+    const block = text.slice(start, text.indexOf('missing=()', start));
+    const list: string[] = [];
+    for (const line of block.split('\n')) {
+      const mandatory = /^\s*"(LightPen_\$\{VERSION\}_[a-z0-9_-]+)"\s*$/.exec(line);
+      if (mandatory) {
+        list.push(mandatory[1]!);
+        continue;
+      }
+      const conditional =
+        /\[\[ "\$BUILD_(\w+)" == "true" \]\] && expected\+=\("(LightPen_\$\{VERSION\}_[a-z0-9_-]+)"\)/.exec(
+          line,
+        );
+      if (conditional) {
+        const [, input, target] = conditional;
+        const on =
+          (input === 'MACOS' && inputs.macos) ||
+          (input === 'ANDROID' && inputs.android) ||
+          (input === 'IOS' && inputs.ios);
+        if (on) list.push(target!);
+      }
+    }
+    return list;
+  }
+
+  it('does not demand macOS when build_macos is off', () => {
+    // This is the bug that failed a good release: the list hardcoded macOS.
+    const names = expected({ macos: false, android: false, ios: false });
+    expect(names.some((n) => n.includes('macos'))).toBe(false);
+    expect(names).toEqual([
+      'LightPen_${VERSION}_windows-x64',
+      'LightPen_${VERSION}_windows-arm64',
+      'LightPen_${VERSION}_linux-x64',
+    ]);
+  });
+
+  it('demands macOS only when build_macos is on', () => {
+    expect(expected({ macos: true, android: false, ios: false })).toContain(
+      'LightPen_${VERSION}_macos-universal',
+    );
+  });
+
+  it('gates android and iOS the same way', () => {
+    const all = expected({ macos: true, android: true, ios: true });
+    expect(all).toContain('LightPen_${VERSION}_android_universal');
+    expect(all).toContain('LightPen_${VERSION}_ios_arm64');
+    expect(all).toHaveLength(6);
+  });
+
+  it('passes every input the expectation list reads', () => {
+    const text = release();
+    const step = text.slice(
+      text.indexOf('name: Collect release assets'),
+      text.indexOf('expected=('),
+    );
+    for (const name of ['BUILD_MACOS', 'BUILD_ANDROID', 'BUILD_IOS']) {
+      expect(step, `${name} must be in the verify step env`).toContain(`${name}:`);
+    }
+  });
+});
+
+describe('release artifact publishing', () => {
+  it('does not let tauri-action upload alongside our renamed artifacts', () => {
+    // With a releaseId the action uploads the default-named bundles too, so every
+    // artifact appeared twice in the release.
+    const text = read('.github/workflows/release.yml');
+    const action = text.slice(
+      text.indexOf('uses: tauri-apps/tauri-action@'),
+      text.indexOf('name: Normalise artifact names'),
+    );
+    expect(action).not.toContain('releaseId:');
+    expect(text).toContain('gh release upload');
+  });
+
+  it('does not give the desktop job a release id it could upload with', () => {
+    const text = read('.github/workflows/release.yml');
+    const job = text.slice(text.indexOf('  build-desktop:'), text.indexOf('  build-android:'));
+    expect(job).not.toMatch(/^\s*RELEASE_ID:/m);
+  });
+
+  it('flags assets outside the published naming scheme', () => {
+    // Stale drafts and default-named bundles are reported, so a duplicate upload
+    // is visible instead of silently shipping twice.
+    const text = read('.github/workflows/release.yml');
+    expect(text).toContain('Unexpected release assets');
+    expect(text).toMatch(/LightPen_\[0-9\]\+\\\.\[0-9\]\+\\\.\[0-9\]\+_/);
   });
 });

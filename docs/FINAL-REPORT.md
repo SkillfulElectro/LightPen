@@ -12,10 +12,13 @@ development environment.
 | Formatting              | `npx prettier --check .`                                     | ✅ clean                                                                          |
 | Lint (zero warnings)    | `npx eslint . --max-warnings 0`                              | ✅ clean                                                                          |
 | TypeScript strict       | `npx tsc --noEmit`                                           | ✅ clean                                                                          |
-| Unit tests              | `npx vitest run`                                             | ✅ 182 tests in 20 files                                                          |
-| Core coverage           | `npx vitest run --coverage`                                  | ✅ 99.2 % statements, 95.5 % branches, 96.8 % functions (threshold 80 %)          |
+| Unit tests              | `npx vitest run`                                             | ✅ 190 tests in 20 files                                                          |
+| Core coverage           | `npx vitest run --coverage`                                  | ✅ 98.4 % statements, 94.5 % branches, 95.8 % functions (threshold 80 %)          |
+| Dependency audit        | `npm audit --audit-level=high`                               | ✅ 0 vulnerabilities                                                              |
+| Rust formatting         | `rustfmt` (WASM build) on `src-tauri/src/*.rs`               | ✅ clean                                                                          |
 | Web production build    | `npm run build`                                              | ✅ pdf.js/MediaPipe split into their own chunks                                   |
 | Workflow syntax         | `actionlint` (WASM) on `ci.yml` + `release.yml`              | ✅ both OK                                                                        |
+| Workflow shell scripts  | `shellcheck` with actionlint's exact rule set and severity   | ✅ all `run:` blocks clean                                                        |
 | Workflow inputs         | `src/core/ciEnv.test.ts`                                     | ✅ every Rust toolchain step passes a version matching `rust-toolchain.toml`      |
 | Annotated PDF export    | exported sample rendered with pypdfium2, parsed with pypdf   | ✅ ink present, correctly placed, stroked (not filled)                            |
 | Rotated-page mapping    | matrices compared with pdf.js `getViewport` for 0/90/180/270 | ✅ exact to 5 decimals; exports rendered correctly                                |
@@ -37,15 +40,15 @@ Three real defects were found and fixed by these checks rather than by reading c
 
 ## 2. Not verified (environment limits)
 
-| Item                                           | Why                                                                                       | Where documented                           |
-| ---------------------------------------------- | ----------------------------------------------------------------------------------------- | ------------------------------------------ |
-| `npm run tauri dev` / `tauri build`            | no Rust toolchain; `static.rust-lang.org` unreachable                                     | RELEASING.md → Unverified                  |
-| `cargo fmt` / `clippy` / `test`                | same                                                                                      | RELEASING.md                               |
-| Playwright e2e (`npm run test:e2e`)            | browser binary (`cdn.playwright.dev`) blocked; tests are written and CI installs Chromium | RELEASING.md                               |
-| Hand tracking with a real webcam, measured FPS | no camera device in the sandbox                                                           | PERFORMANCE.md (targets, not measurements) |
-| Android / iOS builds                           | no SDK/NDK/Xcode                                                                          | RELEASING.md                               |
-| A live run of `release.yml`                    | workflow_dispatch needs the GitHub repo + runners; validated with actionlint only         | RELEASING.md                               |
-| Code signing / notarisation                    | no certificates                                                                           | RELEASING.md secret table                  |
+| Item                                           | Why                                                                                                                          | Where documented                           |
+| ---------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------ |
+| `npm run tauri dev` / `tauri build`            | no Rust toolchain; `static.rust-lang.org` unreachable                                                                        | RELEASING.md → Unverified                  |
+| `cargo fmt` / `clippy` / `test`                | same                                                                                                                         | RELEASING.md                               |
+| Playwright e2e (`npm run test:e2e`)            | browser binary (`cdn.playwright.dev`) blocked; CI installs Chromium and has run it                                           | RELEASING.md                               |
+| Hand tracking with a real webcam, measured FPS | no camera device in the sandbox                                                                                              | PERFORMANCE.md (targets, not measurements) |
+| Android / iOS builds                           | no SDK/NDK/Xcode                                                                                                             | RELEASING.md                               |
+| A live run of `release.yml`                    | has run on GitHub Actions; the unsigned Windows/Linux builds and uploads worked, but no run has yet reached a green `verify` | RELEASING.md                               |
+| Code signing / notarisation                    | no certificates                                                                                                              | RELEASING.md secret table                  |
 
 ## 3. Definition of Done checklist
 
