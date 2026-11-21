@@ -391,3 +391,54 @@ build needs an uninstall first (Android refuses key changes). Text guards in
 `apksigner` gate, the single-APK requirement, or the debug naming ever come back;
 `src/core/settings.test.ts` and `src/ui/app.smoke.test.tsx` cover the preview
 default and the toggle.
+
+## ADR-025 — A hidden self-view must not hide the video from the decoder
+
+**Context.** After v0.1.5 a Linux user reported: the camera opened (OS LED on),
+but the panel stayed at **0 FPS** and no hand was ever detected. Their log shows
+a working but unaccelerated WebKitGTK media stack (`WebKit wasn't able to find
+the GL video sink dependencies`, `GstAppSrc has no property named
+'automatic-eos'`) and nothing else — no JavaScript error, because nothing
+surfaced one.
+
+Two defects met there:
+
+1. v0.1.5 made the self-view opt-in and hid it with
+   `.camera-panel.collapsed .camera-video-wrap { display: none }`. WebKit's media
+   pipeline does not decode frames for a `<video>` that is not rendered.
+   `requestVideoFrameCallback` therefore never fires, and MediaPipe's
+   `detectForVideo` throws `no video frame` — the camera is "on" while the
+   tracker sees nothing. The same trap exists with `visibility: hidden`, the
+   `hidden` attribute, `opacity: 0`, `clip-path: inset(50%)` and 1px boxes.
+2. `runFrameLoop` scheduled the next frame only from inside the previous
+   callback and never caught exceptions, so the first hiccup ended tracking
+   permanently — and the UI reported that as a healthy "0 FPS".
+   Separately, MediaPipe rejects a non-increasing timestamp, and the watchdog
+   needed for (1) can legitimately produce two detections in the same
+   millisecond.
+
+**Decision.**
+
+- The `<video>` element is **never** removed from rendering. When the self-view
+  is off, `.camera-video-wrap--offscreen` moves it to `position: fixed; left:
+-10000px` at 320×240 (`src/core/cameraDom.ts` + `index.css`, kept in sync by a
+  unit test). The pane is invisible; the element is laid out, painted and
+  decoded exactly like any other off-screen video.
+- `runFrameLoop` catches caller exceptions, and arms a 1 s watchdog while
+  waiting for a video frame: a stalled pipeline degrades to polling (so it can
+  recover and FPS reflects reality) instead of freezing forever. Generation
+  counters stop a late frame from double-ticking next to the watchdog.
+- `detectHand` makes the timestamp strictly increasing per landmarker.
+- A pure `diagnoseTracker`/`longHandAbsence` (`src/core/trackerHealth.ts`)
+  names the failure — _no frames_, _detector error_, _no hand_ — and the panel
+  shows the matching message plus a copyable diagnostic line. A failure that
+  cannot be described cannot be fixed by a user, and "0 FPS" describes nothing.
+
+**Consequences.** Hiding the self-view is now purely a CSS/visibility decision
+and cannot affect capture, on any platform. A broken camera stack is visible in
+the first second instead of being a silent zero. The cost is a 320×240 off-screen
+element while tracking (negligible next to the detector) and one extra
+`setTimeout` per frame in the loop. `src/platform/camera.test.ts` pins the
+watchdog, the stale-callback and the throwing-callback behaviour;
+`src/ui/app.smoke.test.tsx` asserts the collapsed panel keeps an attached,
+non-`display:none` video inside `.camera-video-wrap--offscreen`.

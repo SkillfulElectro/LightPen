@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Camera opened but tracking stayed at 0 FPS and never saw a hand (0.1.5,
+  Linux/WebKitGTK).** Two bugs compounded. (1) With the self-view hidden —
+  the default — the `<video>` was `display: none`, and WebKitGTK stops
+  decoding frames for a video element that is not rendered;
+  `requestVideoFrameCallback` never fired and MediaPipe's
+  `detectForVideo` threw `no video frame`. The preview is now moved fully
+  off-screen at a real size instead, so the pane is invisible while the
+  stream keeps decoding. (2) A single exception from the detector killed
+  the frame loop silently, which is why the panel showed "0 FPS" and
+  nothing else. The loop now survives a bad frame, polls with a watchdog
+  when no frames arrive for a second, and keeps MediaPipe timestamps
+  strictly increasing (a repeat timestamp throws). When something is
+  wrong the panel says which of _no frames_, _detector error_ or _no hand
+  found_ it is, with a one-line diagnostic (resolution, `readyState`, FPS,
+  user agent) to paste into a bug report.
 - **Android release APK would not install** ("App not installed as package
   appears to be invalid"). Without the `ANDROID_KEY_*` secrets the signing
   step was skipped, yet the build step still produced a _release_ APK, and
@@ -42,6 +57,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `src/core/cameraDom.ts` and `src/core/trackerHealth.ts`: the
+  offscreen-video contract and the tracking diagnosis are pure, unit-tested
+  modules, and `src/core/cameraDom.test.ts` fails if `index.css` and the
+  TypeScript declarations ever disagree.
 - **Logo for every platform.** A single master (`src-tauri/icons/icon.svg`,
   rendered to `icon.png`) generates the macOS `.icns`, Windows `.ico` and
   Store tiles, Android mipmaps + adaptive icon and iOS `AppIcon`s with

@@ -25,6 +25,8 @@ experience; Rust only provides the native shell.
 │    coords.ts       camera → page mapping, mirroring, calibration, clamping    │
 │    annotations.ts  AnnotationStore (undo/redo, hit-test, serialization)       │
 │    settings.ts     sanitizeSettings (clamp + validate)                        │
+│    cameraDom.ts    offscreen-preview contract (keeps the video decoding)      │
+│    trackerHealth.ts names why tracking has no frames (no-frames/detector/hand)│
 │    pdfExport.ts    pdf-lib vector export                                      │
 └──────────────────────────────────────────────────────────────────────────────┘
 ```

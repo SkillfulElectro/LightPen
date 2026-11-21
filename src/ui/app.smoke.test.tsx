@@ -291,6 +291,23 @@ describe('camera panel', () => {
     expect(document.querySelector('.camera-panel')?.className).toContain('collapsed');
   });
 
+  it('keeps the hidden video in the DOM and rendering, never display:none', async () => {
+    const { useStore } = await import('../store/useStore');
+    const { default: App } = await import('../App');
+    useStore.getState().updateSettings({ showPreview: false });
+    render(<App />);
+    await screen.findByRole('button', { name: 'Show camera preview' });
+    // WebKitGTK stops decoding a <video> that is display:none / 1px / clipped,
+    // which left tracking at 0 FPS with the camera open. The wrapper must still
+    // be attached, with the offscreen class doing the hiding.
+    const video = document.querySelector('video')!;
+    expect(video).not.toBeNull();
+    const wrap = video.closest('.camera-video-wrap')!;
+    expect(wrap.className).toContain('camera-video-wrap--offscreen');
+    expect(wrap.hasAttribute('hidden')).toBe(false);
+    expect(getComputedStyle(video).display).not.toBe('none');
+  });
+
   it('shows the live status even when the self-view is hidden', async () => {
     const { useStore } = await import('../store/useStore');
     const { default: App } = await import('../App');

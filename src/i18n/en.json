@@ -55,7 +55,10 @@
     "modelMissing": "Hand-tracking model not found. Run `npm run fetch:model` or reinstall the app.",
     "expand": "Show camera preview",
     "collapse": "Hide camera preview",
-    "noCapturePlugins": "The camera could not be opened because the video stack is missing. On Arch/CachyOS run: sudo pacman -S gst-plugins-good gst-plugin-pipewire. On Debian/Ubuntu run: sudo apt install gstreamer1.0-plugins-good gstreamer1.0-pipewire. Or use the AppImage, which bundles them. Then restart LightPen."
+    "noCapturePlugins": "The camera could not be opened because the video stack is missing. On Arch/CachyOS run: sudo pacman -S gst-plugins-good gst-plugin-pipewire. On Debian/Ubuntu run: sudo apt install gstreamer1.0-plugins-good gstreamer1.0-pipewire. Or use the AppImage, which bundles them. Then restart LightPen.",
+    "failureNoFrames": "The camera is open, but its frames are not reaching the tracker, so nothing can be detected. Close other camera apps and press Stop, then Start. On Linux an AppImage may lack the GStreamer capture plugins (Arch/CachyOS: sudo pacman -S gst-plugins-good gst-plugin-pipewire).",
+    "failureDetectorError": "The hand tracker is rejecting the camera frames, so your hand is never seen. Press Stop and Start again; if it persists, send the diagnostics line below with a bug report.",
+    "failureNoHand": "The camera works, but no hand has been found for a while. Keep your whole hand in frame, about arm's length away and well lit."
   },
   "gestures": {
     "penDown": "Pinch thumb + index to write",
