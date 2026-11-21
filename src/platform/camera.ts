@@ -154,41 +154,98 @@ export function stopCamera(stream: MediaStream | null): void {
 }
 
 /**
+ * How long without a single frame before the loop falls back to a timer.
+ *
+ * `requestVideoFrameCallback` only fires when the webview hands us a new
+ * frame. If the capture pipeline stalls (a frozen AppImage GStreamer stack, a
+ * camera that was yanked, a WebKitGTK decoder hiccup) it never fires again:
+ * FPS stays at 0, no error is raised, and nothing can recover because the
+ * loop is waiting for a frame that will never come. A watchdog turns that
+ * silent death into a polled retry, so the app either recovers or can say why.
+ */
+export const FRAME_STALL_MS = 1000;
+
+/**
  * Run a per-frame callback with `requestVideoFrameCallback` when available,
- * falling back to `requestAnimationFrame`. Returns a stop function.
- * Also reports measured FPS via `onFps`.
+ * falling back to `requestAnimationFrame` and finally to a timer watchdog.
+ * Returns a stop function. Also reports measured FPS via `onFps`.
+ *
+ * `onFrame` exceptions are the caller's problem (it reports them); they are
+ * caught here so one bad frame cannot kill the loop.
  */
 export function runFrameLoop(
   video: HTMLVideoElement,
   onFrame: (nowMs: number) => void,
   onFps?: (fps: number) => void,
+  watchdogMs = FRAME_STALL_MS,
 ): () => void {
   let stopped = false;
   let frames = 0;
   let lastFpsTime = performance.now();
-  const tick = (nowMs: number) => {
-    if (stopped) return;
-    onFrame(nowMs);
-    frames += 1;
-    if (onFps && nowMs - lastFpsTime >= 1000) {
-      onFps((frames * 1000) / (nowMs - lastFpsTime));
-      frames = 0;
-      lastFpsTime = nowMs;
+  let watchdog: ReturnType<typeof setTimeout> | null = null;
+  // Incremented on every schedule; a stale callback (or the watchdog racing a
+  // late video-frame callback) is ignored instead of producing a double tick.
+  let generation = 0;
+
+  const report = (nowMs: number) => {
+    if (!onFps || nowMs - lastFpsTime < 1000) return;
+    onFps((frames * 1000) / (nowMs - lastFpsTime));
+    frames = 0;
+    lastFpsTime = nowMs;
+  };
+
+  const tick = (nowMs: number, gen: number) => {
+    if (stopped || gen !== generation) return;
+    generation += 1; // invalidate the watchdog and any queued callback
+    clearWatchdog();
+    try {
+      onFrame(nowMs);
+    } catch {
+      // The caller reports detector failures; never let one abort the loop.
     }
+    frames += 1;
+    report(nowMs);
     schedule();
   };
-  const rvfc = video as HTMLVideoElement & {
-    requestVideoFrameCallback?: (cb: (now: number) => void) => number;
-  };
-  const schedule = () => {
-    if (typeof rvfc.requestVideoFrameCallback === 'function') {
-      rvfc.requestVideoFrameCallback(tick);
-    } else {
-      requestAnimationFrame(tick);
+
+  const clearWatchdog = () => {
+    if (watchdog !== null) {
+      clearTimeout(watchdog);
+      watchdog = null;
     }
   };
+
+  const rvfc = video as HTMLVideoElement & {
+    requestVideoFrameCallback?: (cb: (now: number, meta: unknown) => void) => number;
+  };
+  const usesVideoFrames = typeof rvfc.requestVideoFrameCallback === 'function';
+
+  function schedule() {
+    if (stopped) return;
+    generation += 1;
+    const gen = generation;
+    if (usesVideoFrames) {
+      rvfc.requestVideoFrameCallback!((now) => tick(now, gen));
+      clearWatchdog();
+      watchdog = setTimeout(() => {
+        watchdog = null;
+        // No frame arrived: poll once so the stall is visible as 0 FPS and
+        // the health check can name it, then keep going.
+        tick(performance.now(), gen);
+      }, watchdogMs);
+    } else {
+      requestAnimationFrame(() => tick(performance.now(), gen));
+    }
+  }
+
   schedule();
   return () => {
     stopped = true;
+    clearWatchdog();
   };
+}
+
+/** True when the element currently holds a decodable frame. */
+export function hasLiveFrames(video: HTMLVideoElement): boolean {
+  return video.readyState >= 2 && video.videoWidth > 0 && video.videoHeight > 0;
 }

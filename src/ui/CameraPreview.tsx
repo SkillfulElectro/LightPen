@@ -10,6 +10,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { addPoint, createStroke } from '../core/annotations';
+import { videoWrapClass } from '../core/cameraDom';
 import {
   cameraToPage,
   clampToPage,
@@ -20,6 +21,13 @@ import {
 import { GestureClassifier } from '../core/gesture';
 import { DEFAULT_TOUCH_CONFIG, TouchGestureClassifier } from '../core/touchGestures';
 import { OneEuroPoint } from '../core/oneEuro';
+import {
+  diagnoseTracker,
+  diagnosticText,
+  longHandAbsence,
+  TRACKER_FAILURE_MESSAGE_KEY,
+  type TrackerFailure,
+} from '../core/trackerHealth';
 import type { PageSize, Stroke } from '../core/types';
 import {
   CAMERA_ERROR_MESSAGE_KEY,
@@ -48,6 +56,10 @@ export default function CameraPreview({ pageSize, onGesture }: Props) {
   const [cameras, setCameras] = useState<CameraDevice[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [modelMissing, setModelMissing] = useState(false);
+  // Why no frames arrive, when that happens. Filled by the health check below
+  // so a dead tracker explains itself instead of sitting at "0 FPS".
+  const [failure, setFailure] = useState<TrackerFailure | null>(null);
+  const [failureDetail, setFailureDetail] = useState<string | null>(null);
   // The self-view is opt-in (persisted `showPreview`, off by default): you
   // don't need to watch yourself to write — tracking, the hand cursor and
   // the hints all work with the preview hidden, on desktop and mobile
@@ -73,6 +85,8 @@ export default function CameraPreview({ pageSize, onGesture }: Props) {
   }, [refreshCameras]);
 
   const stop = useCallback(() => {
+    setFailure(null);
+    setFailureDetail(null);
     stopLoopRef.current?.();
     stopLoopRef.current = null;
     stopCamera(streamRef.current);
@@ -84,6 +98,8 @@ export default function CameraPreview({ pageSize, onGesture }: Props) {
   const start = useCallback(async () => {
     setError(null);
     setModelMissing(false);
+    setFailure(null);
+    setFailureDetail(null);
     try {
       const stream = await startCamera(settings.cameraId);
       streamRef.current = stream;
@@ -143,13 +159,59 @@ export default function CameraPreview({ pageSize, onGesture }: Props) {
         useStore.setState({ activeStroke: null });
       };
 
+      // Health accounting for `diagnoseTracker`: a detector exception must not
+      // end tracking (WebKitGTK throws "no video frame" on a single bad frame),
+      // and a long gap must be visible as a number rather than a blank panel.
+      let detectorErrors = 0;
+      let consecutiveErrors = 0;
+      let fps = 0;
+      let reportedFailure: TrackerFailure | null = null;
+      // Give a cold start a moment: the first frame of a 4K/VP8 stream can take
+      // longer than the first FPS tick, and crying "no frames" then would be a
+      // false alarm on a working camera.
+      const healthGraceMs = 2500;
+      const loopStartedAt = performance.now();
+
+      const reportHealth = () => {
+        if (performance.now() - loopStartedAt < healthGraceMs) return;
+        const sample = {
+          videoWidth: video.videoWidth,
+          videoHeight: video.videoHeight,
+          readyState: video.readyState,
+          fps,
+          lostFrames,
+          detectorErrors,
+        };
+        const diagnosis = diagnoseTracker(sample) ?? longHandAbsence(sample);
+        const next = diagnosis ? diagnosis.failure : null;
+        if (next === reportedFailure) return; // state changes once, not per second
+        reportedFailure = next;
+        setFailure(next);
+        setFailureDetail(diagnosis ? diagnosticText(diagnosis, navigator.userAgent) : null);
+      };
+
       const stopLoop = runFrameLoop(
         video,
         (nowMs) => {
           frameSkip += 1;
           if (frameSkip < adaptiveSkip) return;
           frameSkip = 0;
-          const result = detectHand(landmarker, video, nowMs);
+          let result;
+          try {
+            result = detectHand(landmarker, video, nowMs);
+            consecutiveErrors = 0;
+          } catch {
+            detectorErrors += 1;
+            consecutiveErrors += 1;
+            // Keep the overlay honest: no stale skeleton on a failed frame.
+            drawOverlay(video, null);
+            if (consecutiveErrors === 15) {
+              // ~0.5 s of unbroken failures is not a hiccup; report it now
+              // rather than waiting for the next FPS tick.
+              reportHealth();
+            }
+            return;
+          }
           drawOverlay(video, result?.landmarks ?? null);
           if (!result) {
             lostFrames += 1;
@@ -288,9 +350,11 @@ export default function CameraPreview({ pageSize, onGesture }: Props) {
           });
         },
         (measuredFps) => {
+          fps = measuredFps;
           setTracking({ fps: Math.round(measuredFps) });
           // Adaptive quality: halve detection rate when FPS drops.
           adaptiveSkip = measuredFps < 20 ? 2 : 1;
+          reportHealth();
         },
       );
       stopLoopRef.current = stopLoop;
@@ -399,7 +463,7 @@ export default function CameraPreview({ pageSize, onGesture }: Props) {
           </span>
         )}
       </div>
-      <div className="camera-video-wrap">
+      <div className={videoWrapClass(collapsed)}>
         <video
           ref={videoRef}
           className="camera-video"
@@ -453,6 +517,12 @@ export default function CameraPreview({ pageSize, onGesture }: Props) {
         <p className="camera-error" role="alert">
           {t('camera.modelMissing')}
         </p>
+      )}
+      {failure && (
+        <div className="camera-error" role="alert">
+          <p>{t(TRACKER_FAILURE_MESSAGE_KEY[failure])}</p>
+          {failureDetail && <p className="camera-diagnostic">{failureDetail}</p>}
+        </div>
       )}
       {hint && (
         <p className="camera-hint" role="status">

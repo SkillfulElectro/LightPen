@@ -5,7 +5,7 @@
  * connected" sends them to the wrong place, so the error kind must differ.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { CameraError, startCamera, type CameraErrorKind } from './camera';
+import { CameraError, runFrameLoop, startCamera, type CameraErrorKind } from './camera';
 
 type Behaviour =
   { kind: 'ok' } | { kind: 'throw'; name: string } | { kind: 'throw-once-then-ok'; name: string };
@@ -119,5 +119,98 @@ describe('startCamera', () => {
     await expect(
       failure({ kind: 'throw', name: 'OverconstrainedError' }, ['videoinput']),
     ).resolves.toMatchObject({ kind: 'not-found' });
+  });
+});
+
+describe('runFrameLoop', () => {
+  type FrameCb = (now: number, meta: unknown) => void;
+
+  /** A fake <video> that only fires video-frame callbacks when told to. */
+  function fakeVideo() {
+    const callbacks: FrameCb[] = [];
+    const video = {
+      requestVideoFrameCallback: (cb: FrameCb) => {
+        callbacks.push(cb);
+        return callbacks.length;
+      },
+    } as unknown as HTMLVideoElement;
+    return {
+      video,
+      /** Deliver one frame to the pending callback. */
+      frame(now = performance.now()) {
+        const cb = callbacks.shift();
+        cb?.(now, {});
+      },
+      get pending() {
+        return callbacks.length;
+      },
+    };
+  }
+
+  it('polls instead of freezing when the webview stops delivering frames', async () => {
+    // The reported bug: requestVideoFrameCallback never fires again, FPS stays
+    // at 0 and there is no way back. The watchdog must keep the loop alive.
+    vi.useFakeTimers();
+    try {
+      const fake = fakeVideo();
+      let frames = 0;
+      const stop = runFrameLoop(fake.video, () => (frames += 1), undefined, 1000);
+      expect(frames).toBe(0);
+      await vi.advanceTimersByTimeAsync(1100);
+      expect(frames).toBe(1); // polled anyway
+      expect(fake.pending).toBeGreaterThanOrEqual(1); // re-armed, can recover
+      stop();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not double-tick when a late frame races the watchdog', async () => {
+    vi.useFakeTimers();
+    try {
+      const { video, frame } = fakeVideo();
+      let frames = 0;
+      const stop = runFrameLoop(video, () => (frames += 1), undefined, 1000);
+      frame();
+      expect(frames).toBe(1);
+      await vi.advanceTimersByTimeAsync(1100);
+      // Its own watchdog was cleared by the arriving frame; exactly one poll.
+      expect(frames).toBe(2);
+      stop();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('survives a callback that throws', () => {
+    const { video, frame } = fakeVideo();
+    let calls = 0;
+    const stop = runFrameLoop(
+      video,
+      () => {
+        calls += 1;
+        throw new Error('no video frame');
+      },
+      undefined,
+      1000,
+    );
+    frame();
+    frame();
+    expect(calls).toBe(2); // the loop kept scheduling
+    stop();
+  });
+
+  it('stops scheduling after the returned stop function runs', async () => {
+    vi.useFakeTimers();
+    try {
+      const { video } = fakeVideo();
+      let frames = 0;
+      const stop = runFrameLoop(video, () => (frames += 1), undefined, 1000);
+      stop();
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(frames).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

@@ -282,9 +282,25 @@ label.check {
 
 /* Collapsing hides ONLY the self-view video. The controls, errors and
    hints stay: hiding your own face must never hide how to stop the
-   camera — or that it is on (see the live badge in the header). */
-.camera-panel.collapsed .camera-video-wrap {
-  display: none;
+   camera — or that it is on (see the live badge in the header).
+
+   `display: none` is NOT an option here: on Linux/WebKitGTK a <video> that is
+   not rendered (display/visibility/opacity/clip, or `hidden`) stops producing
+   frames, so requestVideoFrameCallback never fires, detectForVideo throws
+   "no video frame" and tracking dies at 0 FPS. The pane is therefore moved
+   fully off-screen at a real size: still laid out, still decoding, invisible.
+
+   Must stay identical to OFFSCREEN_DECLARATIONS in src/core/cameraDom.ts
+   (guarded by src/core/cameraDom.test.ts). */
+/* Higher specificity than `.camera-video-wrap` below, which would otherwise
+   win the width/position declarations by coming later in the file. */
+.camera-panel .camera-video-wrap--offscreen {
+  position: fixed;
+  top: 0;
+  left: -10000px;
+  width: 320px;
+  height: 240px;
+  pointer-events: none;
 }
 
 .camera-video-wrap {
@@ -318,6 +334,20 @@ label.check {
 .camera-error {
   color: var(--error);
   font-size: 0.9rem;
+}
+
+.camera-error p {
+  margin: 0 0 0.25rem;
+}
+
+/* The one-line measurement behind the message (FPS, readyState, UA): small
+   and selectable so a user can paste it into a bug report. */
+.camera-diagnostic {
+  color: var(--text-secondary);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.72rem;
+  white-space: pre-wrap;
+  user-select: text;
 }
 
 .camera-hint {

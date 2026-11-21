@@ -50,14 +50,27 @@ export function getHandLandmarker(): Promise<HandLandmarker> {
   return landmarkerPromise;
 }
 
+/**
+ * MediaPipe rejects a timestamp that is not strictly greater than the previous
+ * one. `detectForVideo` can be reached twice with the same millisecond (a
+ * watchdog poll racing a video-frame callback, or a stalled stream answered
+ * from the timer), which throws and — before the loop learned to survive it —
+ * killed tracking outright. Timestamps are therefore made monotonic here.
+ */
+const lastTimestamp = new WeakMap<HandLandmarker, number>();
+
 /** Detect hands in the current video frame. Returns null when no hand. */
 export function detectHand(
   landmarker: HandLandmarker,
   video: HTMLVideoElement,
   nowMs: number,
 ): HandResult | null {
-  if (video.readyState < 2) return null;
-  const result = landmarker.detectForVideo(video, nowMs);
+  if (video.readyState < 2 || video.videoWidth === 0) return null;
+  let timestamp = nowMs;
+  const previous = lastTimestamp.get(landmarker);
+  if (previous !== undefined && timestamp <= previous) timestamp = previous + 1;
+  lastTimestamp.set(landmarker, timestamp);
+  const result = landmarker.detectForVideo(video, timestamp);
   const landmarks = result.landmarks?.[0];
   if (!landmarks) return null;
   const handedness = result.handedness?.[0]?.[0]?.categoryName === 'Left' ? 'Left' : 'Right';
