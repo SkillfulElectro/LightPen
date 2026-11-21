@@ -73,6 +73,19 @@ describe('sanitizeSettings extra rules', () => {
   });
 });
 
+describe('camera preview (self-view)', () => {
+  it('is hidden by default — you do not need to watch yourself to write', () => {
+    expect(DEFAULT_SETTINGS.showPreview).toBe(false);
+    expect(sanitizeSettings(null).showPreview).toBe(false);
+  });
+
+  it('keeps an explicit choice across a save and reload', () => {
+    expect(sanitizeSettings({ showPreview: true }).showPreview).toBe(true);
+    expect(sanitizeSettings({ showPreview: false }).showPreview).toBe(false);
+    expect(sanitizeSettings({ showPreview: 'yes' }).showPreview).toBe(false);
+  });
+});
+
 describe('gesture mode', () => {
   it('defaults to air, so an upgrade does not change what a gesture means', () => {
     expect(sanitizeSettings(null).gestureMode).toBe('air');

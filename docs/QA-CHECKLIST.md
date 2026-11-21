@@ -27,6 +27,10 @@ need a human, a real camera and real hardware. Copy this list into the release P
 - [ ] The cheat sheet shows the vocabulary of the mode in use, and switching modes in Settings updates it immediately.
 - [ ] Silence the camera (cover it) → "low light" hint appears; move the hand out of frame → "out of frame" hint.
 - [ ] Switching to another window stops the stream (camera LED off).
+- [ ] **Self-view hidden by default** on desktop (narrow and wide window) and on a phone: only the video is gone — the live FPS badge, Start/Stop, the camera picker, the hints and the privacy note stay. Tracking and the hand cursor are unaffected.
+- [ ] The panel toggle and Settings → _Camera preview (self-view)_ stay in sync, and the choice survives a restart.
+- [ ] **Android APK installs.** With `ANDROID_KEY_*` secrets: `LightPen_<v>_android_universal.apk` installs and `apksigner verify --print-certs` prints the release DN. Without them: `LightPen_<v>_android_universal_debug.apk` installs and is debug-signed. An _unsigned_ build must never appear in a release.
+- [ ] **Icon looks right in the launcher, dock/taskbar, Start menu and the browser tab** (same mark everywhere): no white rim on Android adaptive icons, no cropped stroke at small sizes.
 - [ ] Window size and position restore after restart.
 
 ## Android

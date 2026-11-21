@@ -48,13 +48,19 @@ export default function CameraPreview({ pageSize, onGesture }: Props) {
   const [cameras, setCameras] = useState<CameraDevice[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [modelMissing, setModelMissing] = useState(false);
-  // On phones the panel floats over the page so the user can see their hand
-  // and the PDF at the same time; on desktop it stays in the side column.
-  const [collapsed, setCollapsed] = useState(true);
+  // The self-view is opt-in (persisted `showPreview`, off by default): you
+  // don't need to watch yourself to write — tracking, the hand cursor and
+  // the hints all work with the preview hidden, on desktop and mobile
+  // alike. The toggle below works in both layouts, and the live badge in
+  // the header stays visible while the camera is on even when the
+  // preview itself is hidden (hiding your face must not hide that the
+  // camera is running).
+  const updateSettings = useStore((s) => s.updateSettings);
   const active = useStore((s) => s.tracking.active);
   const fps = useStore((s) => s.tracking.fps);
   const hint = useStore((s) => s.tracking.hint);
   const settings = useStore((s) => s.settings);
+  const collapsed = !settings.showPreview;
   const setTracking = useStore((s) => s.setTracking);
   const tool = useStore((s) => s.tool);
 
@@ -377,15 +383,22 @@ export default function CameraPreview({ pageSize, onGesture }: Props) {
 
   return (
     <div className={`camera-panel ${collapsed ? 'collapsed' : ''}`} aria-label="Camera preview">
-      <button
-        type="button"
-        className="camera-collapse"
-        onClick={() => setCollapsed((c) => !c)}
-        aria-expanded={!collapsed}
-        aria-label={t(collapsed ? 'camera.expand' : 'camera.collapse')}
-      >
-        📷 {t('toolbar.camera')}
-      </button>
+      <div className="camera-header">
+        <button
+          type="button"
+          className="camera-collapse"
+          onClick={() => updateSettings({ showPreview: collapsed })}
+          aria-expanded={!collapsed}
+          aria-label={t(collapsed ? 'camera.expand' : 'camera.collapse')}
+        >
+          📷 {t('toolbar.camera')}
+        </button>
+        {active && (
+          <span className="camera-live-badge" role="status">
+            ● {t('camera.fps', { fps })}
+          </span>
+        )}
+      </div>
       <div className="camera-video-wrap">
         <video
           ref={videoRef}
@@ -396,11 +409,6 @@ export default function CameraPreview({ pageSize, onGesture }: Props) {
           style={{ transform: settings.mirrored ? 'scaleX(-1)' : undefined }}
         />
         <canvas ref={overlayRef} className="camera-overlay" aria-hidden="true" />
-        {active && (
-          <span className="camera-live" role="status">
-            ● {t('camera.fps', { fps })}
-          </span>
-        )}
       </div>
       <div className="camera-controls">
         <button

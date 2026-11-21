@@ -263,14 +263,42 @@ describe('sidecar identity (ADR-020)', () => {
   });
 });
 
-describe('mobile camera panel', () => {
-  it('is collapsible and reports its expanded state', async () => {
+describe('camera panel', () => {
+  it('hides the self-view by default and can show it again', async () => {
+    const { useStore } = await import('../store/useStore');
+    const { DEFAULT_SETTINGS } = await import('../core/types');
     const { default: App } = await import('../App');
+    useStore.getState().updateSettings({ showPreview: DEFAULT_SETTINGS.showPreview });
     render(<App />);
     const toggle = await screen.findByRole('button', { name: 'Show camera preview' });
+    // Off by default on every viewport — watching yourself is opt-in.
     expect(toggle.getAttribute('aria-expanded')).toBe('false');
     fireEvent.click(toggle);
     expect(toggle.getAttribute('aria-expanded')).toBe('true');
     expect(screen.getByRole('button', { name: 'Hide camera preview' })).toBeTruthy();
+  });
+
+  it('keeps the tracking controls in the panel while the self-view is hidden', async () => {
+    const { useStore } = await import('../store/useStore');
+    const { default: App } = await import('../App');
+    useStore.getState().updateSettings({ showPreview: false });
+    render(<App />);
+    // Hiding the video must never hide how to start/stop the camera: the
+    // start button and the privacy note stay part of the collapsed panel.
+    const startButton = await screen.findByRole('button', { name: 'Start camera' });
+    expect(startButton).toBeTruthy();
+    expect(screen.getByText(/No frames ever leave your device/)).toBeTruthy();
+    expect(document.querySelector('.camera-panel')?.className).toContain('collapsed');
+  });
+
+  it('shows the live status even when the self-view is hidden', async () => {
+    const { useStore } = await import('../store/useStore');
+    const { default: App } = await import('../App');
+    useStore.getState().updateSettings({ showPreview: false });
+    render(<App />);
+    await screen.findByRole('button', { name: 'Show camera preview' });
+    // Hiding the preview must not hide that the camera is running.
+    act(() => useStore.getState().setTracking({ active: true, fps: 27 }));
+    expect(await screen.findByText(/27 FPS/)).toBeTruthy();
   });
 });

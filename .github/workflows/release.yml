@@ -22,7 +22,7 @@ on:
         default: true
         type: boolean
       build_android:
-        description: 'Build Android (.apk/.aab). Requires Android secrets for signing.'
+        description: 'Build Android. Signs with ANDROID_KEY_* secrets when set, else a debug-signed test APK.'
         required: false
         default: true
         type: boolean
@@ -388,8 +388,6 @@ jobs:
     timeout-minutes: 90
     permissions:
       contents: write
-    env:
-      HAS_ANDROID_KEYSTORE: ${{ secrets.ANDROID_KEY_BASE64 != '' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -448,11 +446,17 @@ jobs:
         # MainActivity override in the freshly generated project.
         run: npm run android:permissions
 
-      - name: Configure Android signing (optional)
+      - name: Configure Android signing (release builds)
         # Must run *after* `android init`, which creates gen/android, and it edits
         # the generated Gradle build: per the Tauri docs the properties file is
         # gen/android/keystore.properties and app/build.gradle.kts needs a
-        # `release` signingConfig, otherwise Gradle emits an UNSIGNED release APK.
+        # `release` signingConfig, otherwise Gradle emits an UNSIGNED release APK
+        # — and Android refuses to install those ("package appears to be
+        # invalid"), which is exactly what shipped in v0.1.4.
+        #
+        # No secrets is NOT a reason to ship an unsigned release build: we then
+        # build a debug APK instead, which Gradle signs with the debug key. So
+        # every APK we upload is signed, and the signature is checked below.
         env:
           ANDROID_KEY_BASE64: ${{ secrets.ANDROID_KEY_BASE64 }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
@@ -461,7 +465,8 @@ jobs:
         run: |
           set -euo pipefail
           if [[ -z "${ANDROID_KEY_BASE64:-}" ]]; then
-            echo "::warning::No Android keystore secret found — building an UNSIGNED (debug-key) APK."
+            echo "::notice::No ANDROID_KEY_BASE64 secret — building a debug-signed APK for testing."
+            echo "ANDROID_BUILD_KIND=debug" >> "$GITHUB_ENV"
             exit 0
           fi
           mkdir -p "$RUNNER_TEMP/android-keys"
@@ -471,16 +476,69 @@ jobs:
           export ANDROID_KEYSTORE_PATH="$RUNNER_TEMP/android-keys/release.keystore"
           export ANDROID_KEY_PASSWORD="${ANDROID_KEY_PASSWORD:-$ANDROID_KEYSTORE_PASSWORD}"
           npm run android:signing
+          echo "ANDROID_BUILD_KIND=release" >> "$GITHUB_ENV"
 
-      - name: Build APK + AAB
+      - name: Build signed APK (release) or debug APK
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
         run: |
           set -euo pipefail
-          npm run tauri android build -- --apk --aab
+          # A release build without a signingConfig produces an unsigned APK that
+          # Android rejects at install time, so the fallback is a debug build
+          # (always signed by Gradle), clearly named `_debug` below.
+          if [[ "$ANDROID_BUILD_KIND" == "release" ]]; then
+            npm run tauri android build -- --apk --aab
+          else
+            npm run tauri android build -- --debug --apk
+          fi
+
           mkdir -p dist-android
-          VERSION=${{ needs.prepare.outputs.version }}
-          find src-tauri/gen/android -name "*.apk" -exec cp {} "dist-android/LightPen_${VERSION}_android_universal.apk" \;
-          find src-tauri/gen/android -name "*.aab" -exec cp {} "dist-android/LightPen_${VERSION}_android_universal.aab" \;
+          mapfile -t apks < <(find src-tauri/gen/android -name "*.apk")
+          if (( ${#apks[@]} != 1 )); then
+            echo "::error::Expected exactly one APK, found ${#apks[@]}: ${apks[*]}"
+            exit 1
+          fi
+
+          if [[ "$ANDROID_BUILD_KIND" == "release" ]]; then
+            cp "${apks[0]}" "dist-android/LightPen_${VERSION}_android_universal.apk"
+            mapfile -t aabs < <(find src-tauri/gen/android -name "*.aab")
+            if (( ${#aabs[@]} != 1 )); then
+              echo "::error::Expected exactly one AAB, found ${#aabs[@]}: ${aabs[*]}"
+              exit 1
+            fi
+            cp "${aabs[0]}" "dist-android/LightPen_${VERSION}_android_universal.aab"
+          else
+            cp "${apks[0]}" "dist-android/LightPen_${VERSION}_android_universal_debug.apk"
+          fi
           ls -l dist-android
+
+      - name: Verify the APK signature
+        # The gate that v0.1.4 lacked: an unsigned APK is uninstallable, so never
+        # publish one. `apksigner verify` fails on unsigned input and prints the
+        # signer certificate, which also catches "signed with the wrong key".
+        run: |
+          set -euo pipefail
+          # Gradle installs build-tools on demand, so apksigner may only appear
+          # once the build above has run — hence this step sits after it.
+          APKSIGNER="$(find "$ANDROID_HOME/build-tools" -name apksigner -type f 2>/dev/null | sort -V | tail -n 1)"
+          if [[ -z "$APKSIGNER" ]]; then
+            sdkmanager --install "build-tools;35.0.0" > /dev/null
+            APKSIGNER="$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -n 1)"
+          fi
+          echo "Using $APKSIGNER"
+          for apk in dist-android/*.apk; do
+            "$APKSIGNER" verify --print-certs "$apk" | tee apksigner.txt
+            DN="$(grep -m1 'certificate DN' apksigner.txt || true)"
+            if [[ -z "$DN" ]]; then
+              echo "::error::$apk has no signer certificate — it would not install."
+              exit 1
+            fi
+            if [[ "$ANDROID_BUILD_KIND" == "release" && "$DN" == *"Android Debug"* ]]; then
+              echo "::error::$apk is signed with the DEBUG key, not the release keystore."
+              exit 1
+            fi
+            echo "✅ $apk is signed: $DN"
+          done
 
       - name: Upload Android artifacts
         env:
@@ -493,11 +551,20 @@ jobs:
           {
             echo "### Android"
             echo ""
-            if [[ "$HAS_ANDROID_KEYSTORE" == "true" ]]; then
-              echo "✅ Signed with the configured keystore."
+            if [[ "$ANDROID_BUILD_KIND" == "release" ]]; then
+              echo "✅ Release-signed with the configured keystore (\`ANDROID_KEY_BASE64\`)."
+              echo ""
+              echo "Install \`LightPen_*_android_universal.apk\`; the \`.aab\` is for Play."
             else
-              echo "⚠️ **Unsigned build** — no \`ANDROID_KEY_BASE64\` secret. Installable for testing only."
+              echo "⚠️ **Debug-signed test APK** — no \`ANDROID_KEY_BASE64\` secret."
+              echo ""
+              echo "Install \`LightPen_*_android_universal_debug.apk\`. It is signed with"
+              echo "Gradle's debug key, so it installs, but it is a testing build: no"
+              echo "release key, no Play upload, and a future release-signed build must"
+              echo "be uninstalled before installing its first time."
             fi
+            echo ""
+            echo "Signature check: \`apksigner verify\` passed for every uploaded APK."
             echo ""
             ls -l dist-android 2>/dev/null || true
           } >> "$GITHUB_STEP_SUMMARY"
@@ -666,6 +733,10 @@ jobs:
             "LightPen_${VERSION}_linux-x64"
           )
           [[ "$BUILD_MACOS" == "true" ]] && expected+=("LightPen_${VERSION}_macos-universal")
+          # Matched as a prefix, so both `..._android_universal.apk`/`.aab`
+          # (release-signed) and `..._android_universal_debug.apk` (no keystore
+          # secret) satisfy it. The Android job verifies the APK signature
+          # before uploading; an unsigned APK never reaches the release.
           [[ "$BUILD_ANDROID" == "true" ]] && expected+=("LightPen_${VERSION}_android_universal")
           [[ "$BUILD_IOS" == "true" ]] && expected+=("LightPen_${VERSION}_ios_arm64")
 
@@ -693,7 +764,7 @@ jobs:
           while IFS= read -r asset; do
             [[ -z "$asset" ]] && continue
             [[ "$asset" == "SHA256SUMS.txt" ]] && continue
-            if [[ ! "$asset" =~ ^LightPen_[0-9]+\.[0-9]+\.[0-9]+_(windows-x64|windows-arm64|linux-x64|macos-universal|android_universal|ios_arm64)\.[A-Za-z0-9.]+$ ]]; then
+            if [[ ! "$asset" =~ ^LightPen_[0-9]+\.[0-9]+\.[0-9]+_(windows-x64|windows-arm64|linux-x64|macos-universal|android_universal(_debug)?|ios_arm64)\.[A-Za-z0-9.]+$ ]]; then
               unexpected+=("$asset")
             fi
           done < assets.txt

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Matches the logo background (#101c2e in icon.svg) so adaptive-icon
+         masks never show a white rim around the mark. -->
+    <color name="ic_launcher_background">#101C2E</color>
+</resources>

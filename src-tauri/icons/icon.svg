@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <!-- LightPen logo: a PDF page and the stroke a fingertip writes in the air.
+       Source of truth for every platform icon. Regenerate with:
+       npm run tauri icon src-tauri/icons/icon.png  (after re-rendering icon.png from this file)
+       Keep it simple: three shapes, no text, readable at 32 px. -->
+  <rect x="0" y="0" width="1024" height="1024" rx="224" fill="#101c2e"/>
+  <rect x="288" y="200" width="448" height="624" rx="40" fill="#ffffff"/>
+  <path
+    d="M 356 628 C 408 504 452 412 504 412 C 556 412 580 522 628 614 C 652 660 676 682 704 688"
+    fill="none"
+    stroke="#e11d48"
+    stroke-width="56"
+    stroke-linecap="round"
+  />
+  <circle cx="716" cy="690" r="38" fill="#fb7185"/>
+</svg>

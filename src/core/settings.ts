@@ -42,6 +42,7 @@ export function sanitizeSettings(raw: unknown): Settings {
     dominantHand: r.dominantHand === 'left' || r.dominantHand === 'right' ? r.dominantHand : 'auto',
     cameraId: typeof r.cameraId === 'string' ? r.cameraId : null,
     mirrored: bool(r.mirrored, d.mirrored),
+    showPreview: bool(r.showPreview, d.showPreview),
     theme: r.theme === 'light' || r.theme === 'dark' ? r.theme : 'system',
     language: str(r.language, d.language),
     penColor: str(r.penColor, d.penColor),

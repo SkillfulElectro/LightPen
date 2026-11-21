@@ -77,6 +77,12 @@ export interface Settings {
   dominantHand: DominantHand;
   cameraId: string | null;
   mirrored: boolean;
+  /**
+   * Show the live self-view (camera preview) in the panel. Off by default:
+   * tracking, the hand cursor and hints work without watching yourself.
+   * Hiding the preview never hides the "camera is on" indicator.
+   */
+  showPreview: boolean;
   theme: Theme;
   language: string;
   penColor: string;
@@ -99,6 +105,7 @@ export const DEFAULT_SETTINGS: Settings = {
   dominantHand: 'auto',
   cameraId: null,
   mirrored: true,
+  showPreview: false,
   theme: 'system',
   language: 'en',
   penColor: '#e11d48',

@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Android release APK would not install** ("App not installed as package
+  appears to be invalid"). Without the `ANDROID_KEY_*` secrets the signing
+  step was skipped, yet the build step still produced a _release_ APK, and
+  Gradle leaves that unsigned — which Android refuses to install. The job
+  now builds a release APK/AAB only when a keystore is configured, and
+  otherwise a debug-signed APK named
+  `LightPen_<version>_android_universal_debug.apk`. Every APK is checked
+  with `apksigner verify --print-certs` before upload, so an unsigned
+  artifact can no longer reach a release (ADR-024).
+
 - **All platform builds failing at Cargo dependency resolution**
   (`failed to select a version for the requirement tauri-build = "^2.12"`).
   The Tauri subcrates version independently — `tauri` 2.12.x pairs with
@@ -32,6 +42,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Logo for every platform.** A single master (`src-tauri/icons/icon.svg`,
+  rendered to `icon.png`) generates the macOS `.icns`, Windows `.ico` and
+  Store tiles, Android mipmaps + adaptive icon and iOS `AppIcon`s with
+  `tauri icon`; the same mark is served as the web favicon
+  (`public/favicon.svg`) — the UI had no favicon at all before.
+- **The camera self-view is now optional** (`settings.showPreview`, default
+  off), on desktop as well as mobile. The panel toggle and the new
+  Settings → _Camera preview_ choice hide only the video: hand tracking,
+  gestures, hints and the live FPS badge keep working, so nothing tells you
+  less about whether the camera is on.
 - Cross-platform GitHub Actions release pipeline (`release.yml`): tag validation,
   desktop matrix (Windows x64/arm64, macOS universal, Linux x64), Android and iOS
   jobs, `SHA256SUMS.txt`, job summaries, secret-driven signing.

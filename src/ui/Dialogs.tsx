@@ -171,6 +171,16 @@ export function SettingsDialog() {
         </select>
       </label>
       <label>
+        {t('settings.preview')}
+        <select
+          value={settings.showPreview ? 'on' : 'off'}
+          onChange={(e) => update({ showPreview: e.target.value === 'on' })}
+        >
+          <option value="on">{t('settings.previewOn')}</option>
+          <option value="off">{t('settings.previewOff')}</option>
+        </select>
+      </label>
+      <label>
         {t('settings.dominantHand')}
         <select
           value={settings.dominantHand}
