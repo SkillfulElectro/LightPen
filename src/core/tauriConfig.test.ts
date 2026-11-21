@@ -298,6 +298,63 @@ describe('release workflow secret handling', () => {
   });
 });
 
+describe('android release artifacts are always installable', () => {
+  const release = () => read('.github/workflows/release.yml');
+  /** The build-android job only; other jobs must not satisfy these assertions. */
+  const androidJob = () => {
+    const text = release();
+    return text.slice(
+      text.indexOf('  build-android:'),
+      text.indexOf(
+        '  # ------------------------------------------------------------------ ios ---',
+      ),
+    );
+  };
+
+  // v0.1.4 shipped an unsigned release APK: with no ANDROID_KEY_BASE64 the
+  // signing step exited 0, `tauri android build` emitted an unsigned release
+  // build, and Android refused to install it ("package appears to be invalid").
+  it('never builds a release APK when no keystore is configured', () => {
+    const job = androidJob();
+    expect(job).toContain('ANDROID_BUILD_KIND=debug');
+    // The release build must be behind the signed branch, debug otherwise.
+    expect(job).toMatch(
+      /if \[\[ "\$ANDROID_BUILD_KIND" == "release" \]\]; then\s+npm run tauri android build -- --apk --aab\s+else\s+npm run tauri android build -- --debug --apk/,
+    );
+  });
+
+  it('labels the debug build as such instead of shipping it as a release', () => {
+    const job = androidJob();
+    expect(job).toContain('android_universal_debug.apk');
+    // An unsigned-build claim must not survive anywhere in the job.
+    expect(job).not.toMatch(/UNSIGNED \(debug-key\)/);
+  });
+
+  it('verifies the signature of every uploaded APK', () => {
+    const job = androidJob();
+    const verify = job.indexOf('apksigner');
+    const upload = job.indexOf('gh release upload');
+    expect(verify).toBeGreaterThan(-1);
+    expect(upload).toBeGreaterThan(verify);
+    expect(job).toContain('verify --print-certs');
+    expect(job).toContain('certificate DN');
+  });
+
+  it('fails when a release build is signed with the debug key', () => {
+    expect(androidJob()).toContain('Android Debug');
+  });
+
+  it('requires exactly one APK instead of copying whatever it finds', () => {
+    // The old step `find ... -exec cp` silently took any/several *.apk.
+    expect(androidJob()).toContain('Expected exactly one APK');
+    expect(androidJob()).not.toMatch(/-name "\*\.apk" -exec cp/);
+  });
+
+  it('accepts the debug-signed name in the verify allow-list', () => {
+    expect(release()).toContain('android_universal(_debug)?');
+  });
+});
+
 describe('release matrix and optional signing', () => {
   const release = () => read('.github/workflows/release.yml');
 

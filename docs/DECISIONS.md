@@ -343,3 +343,51 @@ keeps bundling the media framework (ADR in `RELEASING.md`). Text guards
 in `src/core/tauriConfig.test.ts` fail if the handler, the camera-only
 scope, the Tauri floor, or the package dependencies are ever dropped;
 the decision itself is unit-tested in `lib.rs`.
+
+## ADR-024 — One logo, generated once, and no self-view by default
+
+**Context.** Three user-facing problems, one theme: the app assumed things about
+the person using it. The Android APK from v0.1.4 would not install. The icon set
+was generated ad hoc with no master source and the web UI had no icon at all. And
+the camera panel always showed the live self-view on desktop: the collapse
+control was `display: none` above 800px and its hiding rules lived inside the
+mobile media query, so `collapsed = true` did nothing on a laptop. Seeing your
+own face is not information you need while writing in the air — it is a mirror.
+
+**Decision.**
+
+1. **Signing is a build-mode choice, not a best-effort step.** With
+   `ANDROID_KEY_BASE64` the job builds a release APK/AAB from the configured
+   keystore; without it, it builds a _debug_ APK (`--debug --apk`) published as
+   `..._android_universal_debug.apk`. It never builds a release variant that no
+   keystore can sign — Gradle would emit an unsigned APK, and Android refuses
+   to install unsigned packages ("App not installed as package appears to be
+   invalid"). `apksigner verify --print-certs` runs before upload for every APK,
+   and a release build signed with the `Android Debug` key is an error.
+2. **One rasterisable master, every platform.** `src-tauri/icons/icon.svg` is the
+   source; `src-tauri/icons/icon.png` (1024²) is its render, and
+   `tauri icon` derives the full set — macOS `.icns`, Windows `.ico`, Windows
+   Store tiles, Android mipmaps + adaptive icon, iOS `AppIcon`s. The same SVG is
+   served as the web favicon (`public/favicon.svg`, linked from `index.html`), so
+   browser tab, dock/taskbar and launcher show the same mark.
+3. **The self-view is opt-in and never load-bearing.** `settings.showPreview`
+   (default **false**) hides the `<video>`; the panel keeps the live FPS badge,
+   the start/stop control, the camera picker, errors, hints and the privacy note.
+   Tracking, gestures and the hand cursor are unaffected because the stream and
+   the tracking loop never depend on whether the video is visible.
+
+**Why default off.** The self-view is a debugging aid. A user holding a phone at
+arm's length, or sitting at a laptop, gains nothing from a picture of themselves,
+and on a phone it competes for screen with the PDF. Hiding it is the default;
+showing it stays one click (panel toggle) or one setting away, and the persisted
+setting means the choice survives a restart.
+
+**Consequences.** The "is my camera on?" question is answered by the FPS badge in
+the panel header, which is visible even when the preview is hidden, so hiding
+your face cannot hide that you are being tracked. The debug APK is deliberately
+labelled in its filename and the job summary warns that a later release-signed
+build needs an uninstall first (Android refuses key changes). Text guards in
+`src/core/tauriConfig.test.ts` fail if unsigned release builds, the
+`apksigner` gate, the single-APK requirement, or the debug naming ever come back;
+`src/core/settings.test.ts` and `src/ui/app.smoke.test.tsx` cover the preview
+default and the toggle.

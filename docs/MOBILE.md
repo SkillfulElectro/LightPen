@@ -54,6 +54,24 @@ part is required — with only the properties file, Gradle still produces an
 unsigned release APK. `release.yml` runs it after `android init` when the keystore
 secrets are present.
 
+**Android only installs signed APKs.** v0.1.4 shipped an unsigned release APK
+because `ANDROID_KEY_BASE64` was unset: the signing step exited 0 and the next
+step still built a _release_ variant, and Gradle signs nothing without a
+signingConfig. Installing it gives the famously unhelpful _"App not installed as
+package appears to be invalid"_. The build job now has two mutually exclusive
+paths, and never both:
+
+| Secrets                               | Build                                                            | Artifact                                      |
+| ------------------------------------- | ---------------------------------------------------------------- | --------------------------------------------- |
+| `ANDROID_KEY_BASE64` + alias/password | `tauri android build -- --apk --aab` (release, release-signed)   | `LightPen_<v>_android_universal.apk` + `.aab` |
+| none                                  | `tauri android build -- --debug --apk` (debug, Gradle debug key) | `LightPen_<v>_android_universal_debug.apk`    |
+
+Before uploading, `apksigner verify --print-certs` must pass for every APK, the
+certificate DN must exist, and a release build signed with the `Android Debug`
+key fails the job. So "installable" is enforced, not assumed — the debug APK
+exists exactly so that a release without secrets still yields something a user
+can install and test.
+
 The original snippet, for reference:
 
 ```kotlin

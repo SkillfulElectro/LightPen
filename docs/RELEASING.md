@@ -38,7 +38,7 @@ Releases are **manual and tag-driven**. Nothing is published on push.
    | --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
    | `prepare`       | validates the tag, checks version sync, creates the release if missing, exports `release_id` / `upload_url`                                                                                                                                                                                              |
    | `build-desktop` | matrix: `windows-latest` (x64 + arm64), `macos-latest` (universal, only when `build_macos`), `ubuntu-22.04`; `tauri-apps/tauri-action` builds (it is given no `releaseId`, so it does not upload), bundles are renamed to `LightPen_<version>_<platform>.<ext>` and uploaded once by `gh release upload` |
-   | `build-android` | JDK 17 + Android SDK/NDK + four Rust Android targets, `tauri android build --apk --aab`, `gh release upload --clobber`                                                                                                                                                                                   |
+   | `build-android` | JDK 17 + Android SDK/NDK + four Rust Android targets, `tauri android build --apk --aab` (or `--debug --apk` without keystore secrets), `apksigner verify` gate, `gh release upload --clobber`                                                                                                            |
    | `build-ios`     | `macos-latest`, optional keychain import, `tauri ios build`, uploads `.ipa` / `.app.tar.gz`                                                                                                                                                                                                              |
    | `verify`        | lists release assets, fails if an artifact expected **for the selected platforms** is missing, generates and uploads `SHA256SUMS.txt`, writes a summary table                                                                                                                                            |
    | `publish`       | un-drafts the release when `draft=false` and verification passed                                                                                                                                                                                                                                         |
@@ -57,7 +57,8 @@ LightPen_<version>_windows-arm64.msi / .exe
 LightPen_<version>_macos-universal.dmg
 LightPen_<version>_macos-universal.app.tar.gz
 LightPen_<version>_linux-x64.deb / .rpm / .AppImage
-LightPen_<version>_android_universal.apk / .aab
+LightPen_<version>_android_universal.apk / .aab      (release keystore configured)
+LightPen_<version>_android_universal_debug.apk       (no keystore: debug-signed test build)
 LightPen_<version>_ios_arm64.ipa
 SHA256SUMS.txt
 ```
@@ -267,6 +268,14 @@ provided data`.** Not a bad certificate: no certificate. The build step
     `setup-android` already accepts the licences, so the pipe is gone; the step
     also verifies the NDK directory exists and exports `NDK_HOME` **and**
     `ANDROID_NDK_HOME`.
+  - **v0.1.4 shipped an APK nobody could install.** `ANDROID_KEY_BASE64` was
+    unset, so the signing step exited 0 with a warning, and the build step still
+    produced a _release_ APK — which Gradle leaves unsigned when no signingConfig
+    exists. Android rejects unsigned packages ("App not installed as package
+    appears to be invalid"). The job now builds `--debug --apk` (always signed by
+    Gradle, published as `..._android_universal_debug.apk`) when no keystore is
+    configured, and gates the upload on `apksigner verify --print-certs`
+    (including a "release build must not be debug-signed" check).
   - **Android signing config was written to a file nothing read**
     (`android-keystore.properties` in the repo root). It now goes to
     `src-tauri/gen/android/keystore.properties` _and_ injects a `release`
