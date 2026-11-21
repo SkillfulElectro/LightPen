@@ -74,30 +74,30 @@ describe('sanitizeSettings extra rules', () => {
 });
 
 describe('camera preview (self-view)', () => {
-  it('is hidden by default — you do not need to watch yourself to write', () => {
-    expect(DEFAULT_SETTINGS.showPreview).toBe(false);
-    expect(sanitizeSettings(null).showPreview).toBe(false);
+  it('is shown by default so users can frame their face and hand', () => {
+    expect(DEFAULT_SETTINGS.showPreview).toBe(true);
+    expect(sanitizeSettings(null).showPreview).toBe(true);
   });
 
   it('keeps an explicit choice across a save and reload', () => {
     expect(sanitizeSettings({ showPreview: true }).showPreview).toBe(true);
     expect(sanitizeSettings({ showPreview: false }).showPreview).toBe(false);
-    expect(sanitizeSettings({ showPreview: 'yes' }).showPreview).toBe(false);
+    expect(sanitizeSettings({ showPreview: 'yes' }).showPreview).toBe(true);
   });
 });
 
 describe('gesture mode', () => {
-  it('defaults to air, so an upgrade does not change what a gesture means', () => {
-    expect(sanitizeSettings(null).gestureMode).toBe('air');
-    expect(DEFAULT_SETTINGS.gestureMode).toBe('air');
+  it('defaults to touch air-gesture simulation', () => {
+    expect(sanitizeSettings(null).gestureMode).toBe('touch');
+    expect(DEFAULT_SETTINGS.gestureMode).toBe('touch');
   });
 
   it('keeps touch mode across a save and reload', () => {
     expect(sanitizeSettings({ gestureMode: 'touch' }).gestureMode).toBe('touch');
   });
 
-  it('falls back to air for an unknown mode rather than failing to load', () => {
-    expect(sanitizeSettings({ gestureMode: 'kinect' } as never).gestureMode).toBe('air');
+  it('falls back to touch for an unknown mode rather than failing to load', () => {
+    expect(sanitizeSettings({ gestureMode: 'kinect' } as never).gestureMode).toBe('touch');
   });
 
   it('clamps the zoom sensitivity to a usable range', () => {

@@ -51,7 +51,7 @@ export function sanitizeSettings(raw: unknown): Settings {
     enablePageSwipe: bool(r.enablePageSwipe, d.enablePageSwipe),
     enablePauseFist: bool(r.enablePauseFist, d.enablePauseFist),
     enableErase: bool(r.enableErase, d.enableErase),
-    gestureMode: r.gestureMode === 'touch' ? 'touch' : 'air',
+    gestureMode: r.gestureMode === 'air' ? 'air' : 'touch',
     zoomSensitivity: num(r.zoomSensitivity, d.zoomSensitivity, 0.25, 4),
   };
 }

@@ -4,6 +4,7 @@ import { contentKey } from './core/docIdentity';
 import { buildAnnotatedPdf } from './core/pdfExport';
 import { flushAutosave, useStore, tutorialSeen } from './store/useStore';
 import { isTauri, restoreWindowSize, saveBytesAs, saveWindowSize } from './platform/tauri';
+import AirCursorOverlay from './ui/AirCursorOverlay';
 import CameraPreview from './ui/CameraPreview';
 import { CheatSheet, PermissionDialog, SettingsDialog, ShortcutsHelp } from './ui/Dialogs';
 import PdfViewer from './ui/PdfViewer';
@@ -257,6 +258,7 @@ export default function App() {
       <CheatSheet />
       <ShortcutsHelp />
       <Tutorial />
+      <AirCursorOverlay />
     </div>
   );
 }

@@ -223,17 +223,44 @@ export default function PdfViewer({ pdfBytes, pdfName, onPdfLoaded }: Props) {
       }
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.clearRect(0, 0, cssW, cssH);
+
+      // Render the active in-progress air-writing stroke live on every frame
+      // (previously inkCanvas only redrew on strokesVersion after releasing pinch).
+      const liveStroke = useStore.getState().activeStroke;
+      if (liveStroke && liveStroke.page === useStore.getState().currentPage) {
+        drawStroke(ctx, liveStroke, matrix, scale);
+      }
+
       if (!cursor) return;
       const p = pdfToViewport({ x: cursor.x, y: cursor.y }, matrix);
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, cursor.kind === 'pen-down' ? 5 : 8, 0, Math.PI * 2);
-      // White halo + saturated fill: legible on both light and dark page content.
-      ctx.fillStyle =
-        cursor.kind === 'pen-down' ? '#be123c' : cursor.kind === 'erase' ? '#b45309' : '#1d4ed8';
-      ctx.fill();
-      ctx.lineWidth = 2;
-      ctx.strokeStyle = '#ffffff';
-      ctx.stroke();
+      ctx.save();
+      if (cursor.kind === 'erase') {
+        ctx.beginPath();
+        ctx.setLineDash([4, 3]);
+        ctx.arc(p.x, p.y, 18 * scale, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(217, 119, 6, 0.14)';
+        ctx.fill();
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = '#b45309';
+        ctx.stroke();
+      } else if (cursor.kind === 'pen-down') {
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, Math.max(4, useStore.getState().settings.penWidth * scale * 0.9), 0, Math.PI * 2);
+        ctx.fillStyle = useStore.getState().settings.penColor;
+        ctx.fill();
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = '#ffffff';
+        ctx.stroke();
+      } else {
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, 7, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(29, 78, 216, 0.25)';
+        ctx.fill();
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = '#1d4ed8';
+        ctx.stroke();
+      }
+      ctx.restore();
     };
     raf = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(raf);

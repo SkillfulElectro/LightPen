@@ -1,31 +1,15 @@
 /**
- * Phone-style gestures, for people who would rather drive LightPen the way they
- * drive a touchscreen than learn a new vocabulary.
- *
- * One hand, the same mapping a phone uses:
- *
- * | Phone                 | LightPen (touch mode)                            |
- * | --------------------- | ------------------------------------------------ |
- * | finger on the glass   | index extended + pinch closed = contact           |
- * | finger lifted         | index curled back = no contact, nothing happens   |
- * | touch and drag        | keep it closed and move = draw                    |
- * | quick tap             | pinch closed and released fast = tap (no ink)     |
- * | two-finger drag       | scroll / turn the page                            |
- * | two-finger spread     | zoom                                              |
- * | long press            | hold a still, closed pinch = pause tracking       |
- *
- * The one place a camera differs from a touchscreen is the *lift*: it cannot
- * see contact, only pose. So "finger up" is the index finger curled back
- * towards the palm instead of extended. That is what stops a lifted finger from
- * inking while you reposition your hand.
- *
- * Erasing is not a gesture here — it is the toolbar's eraser tool, exactly like
- * a phone app: pick the eraser, then touch-and-drag. That keeps "what a tap
- * does" under the user's control instead of guessing from a pose.
+ * Phone-style touch gestures performed in the air with one hand:
+ * - Index finger pointing = live cursor hover / pointer move
+ * - Thumb + index pinch-drag = air-write / drag (or erase with eraser tool)
+ * - Quick thumb + index pinch-release = air tap / click
+ * - Two fingers up (index + middle) moving vertically = smooth air scroll / page turn
+ * - Two fingers up spreading or pinching = smooth pinch-to-zoom
+ * - Open palm (5 fingers extended) = palm erase shortcut
+ * - Closed fist or still pinch hold = grab / pause tracking
  *
  * Pure logic, no DOM — unit-tested with synthetic landmarks.
  */
-
 import type { Landmark } from './types';
 
 export interface TouchGestureConfig {
@@ -48,65 +32,87 @@ export interface TouchGestureConfig {
 }
 
 export const DEFAULT_TOUCH_CONFIG: TouchGestureConfig = {
-  tapThreshold: 0.32,
-  releaseThreshold: 0.45,
-  tapMaxMs: 350,
-  stillTolerance: 0.04,
-  zoomStep: 0.18,
-  scrollStep: 0.25,
-  longPressMs: 900,
+  tapThreshold: 0.42,
+  releaseThreshold: 0.56,
+  tapMaxMs: 380,
+  stillTolerance: 0.045,
+  zoomStep: 0.1,
+  scrollStep: 0.16,
+  longPressMs: 950,
   zoomSensitivity: 1,
 };
 
-export type TouchAction = 'none' | 'point' | 'scroll' | 'zoom' | 'pause';
+export type TouchAction = 'none' | 'hover' | 'point' | 'scroll' | 'zoom' | 'erase' | 'grab' | 'pause';
 
 export interface TouchFrame {
   /** What the page should do this frame. */
   action: TouchAction;
   /** Fingertip (index tip) in normalized camera coords. */
   point: { x: number; y: number };
+  /** Palm center in normalized camera coords (used for open-palm erase). */
+  palmCenter: { x: number; y: number };
   /** True only on the frame a tap is recognised (contact already released). */
   tap: boolean;
   /** Pages to turn this frame; negative is previous. */
   pageDelta: number;
+  /** Continuous vertical two-finger scroll delta in normalized camera units. */
+  scrollDeltaY: number;
   /** Multiplicative zoom this frame (1 = unchanged). */
   zoomFactor: number;
+  /** Direction of active zoom gesture if zooming this frame. */
+  zoomDirection: 'in' | 'out' | null;
   /** True while the index finger counts as touching the page. */
   contact: boolean;
   /** True while two fingers are up. */
   twoFingers: boolean;
   /** Normalized thumb↔index distance, for the preview and for tests. */
   pinchDistance: number;
+  /** Estimated hand size in normalized frame units (for distance hints). */
+  handSize: number;
+  /** 0..1 progress while holding a still pinch / fist toward pause. */
+  holdProgress: number;
 }
 
 const IDLE: TouchFrame = {
   action: 'none',
   point: { x: 0, y: 0 },
+  palmCenter: { x: 0, y: 0 },
   tap: false,
   pageDelta: 0,
+  scrollDeltaY: 0,
   zoomFactor: 1,
+  zoomDirection: null,
   contact: false,
   twoFingers: false,
   pinchDistance: 1,
+  handSize: 0,
+  holdProgress: 0,
 };
 
 const WRIST = 0;
+const THUMB_IP = 3;
 const THUMB_TIP = 4;
+const INDEX_MCP = 5;
 const INDEX_PIP = 6;
 const INDEX_TIP = 8;
 const MIDDLE_MCP = 9;
 const MIDDLE_PIP = 10;
 const MIDDLE_TIP = 12;
+const RING_PIP = 14;
+const RING_TIP = 16;
+const PINKY_MCP = 17;
+const PINKY_PIP = 18;
+const PINKY_TIP = 20;
 
 function dist(a: Landmark, b: Landmark): number {
   return Math.hypot(a.x - b.x, a.y - b.y);
 }
 
-/**
- * Stateful classifier: contact hysteresis, tap-vs-drag timing, long press and
- * the previous two-finger spread (zoom is a *change* in distance, so it needs
- * one frame of history).
- */
+function pinchDist3D(a: Landmark, b: Landmark): number {
+  const dz = ((a.z ?? 0) - (b.z ?? 0)) * 0.35;
+  return Math.hypot(a.x - b.x, a.y - b.y, dz);
+}
+
 export class TouchGestureClassifier {
   private contact = false;
   private contactSince = 0;
@@ -114,8 +120,8 @@ export class TouchGestureClassifier {
   private maxMoved = 0;
   private longPressFired = false;
   private lastSpread: number | null = null;
-  /** Anchor for the two-finger scroll, re-set after each page turn. */
   private scrollAnchor: number | null = null;
+  private lastScrollY: number | null = null;
 
   constructor(private readonly config: TouchGestureConfig = DEFAULT_TOUCH_CONFIG) {}
 
@@ -127,9 +133,9 @@ export class TouchGestureClassifier {
     this.longPressFired = false;
     this.lastSpread = null;
     this.scrollAnchor = null;
+    this.lastScrollY = null;
   }
 
-  /** True while the index finger counts as touching the page. */
   get isContact(): boolean {
     return this.contact;
   }
@@ -140,65 +146,116 @@ export class TouchGestureClassifier {
       return { ...IDLE };
     }
     const wrist = landmarks[WRIST] ?? { x: 0, y: 0, z: 0 };
+    const thumbIp = landmarks[THUMB_IP] ?? wrist;
     const thumbTip = landmarks[THUMB_TIP] ?? wrist;
+    const indexMcp = landmarks[INDEX_MCP] ?? wrist;
     const indexTip = landmarks[INDEX_TIP] ?? wrist;
     const middleMcp = landmarks[MIDDLE_MCP] ?? wrist;
-    const handSize = Math.max(dist(wrist, middleMcp), 1e-6);
+    const pinkyMcp = landmarks[PINKY_MCP] ?? wrist;
 
+    const palmWidth = dist(indexMcp, pinkyMcp);
+    const handSize = Math.max(dist(wrist, middleMcp), palmWidth * 0.72, 1e-6);
     const point = { x: indexTip.x, y: indexTip.y };
-    const pinchDistance = dist(thumbTip, indexTip) / handSize;
+    const palmCenter = { x: (wrist.x + middleMcp.x) / 2, y: (wrist.y + middleMcp.y) / 2 };
 
-    // Same "extended" test as the air classifier, so a pose reads identically
-    // in both modes: the tip is further from the wrist than its middle joint.
+    const tipPinch = pinchDist3D(thumbTip, indexTip) / handSize;
+    const padPinch = (pinchDist3D(thumbIp, indexTip) / handSize) * 1.15;
+    const pinchDistance = Math.min(tipPinch, padPinch);
+
     const extended = (tipIdx: number, pipIdx: number): boolean =>
       dist(landmarks[tipIdx] ?? wrist, wrist) > dist(landmarks[pipIdx] ?? wrist, wrist) * 1.05;
+
     const indexExt = extended(INDEX_TIP, INDEX_PIP);
     const middleExt = extended(MIDDLE_TIP, MIDDLE_PIP);
+    const ringExt = extended(RING_TIP, RING_PIP);
+    const pinkyExt = extended(PINKY_TIP, PINKY_PIP);
+    const thumbExt = dist(thumbTip, wrist) > dist(landmarks[2] ?? wrist, wrist) * 1.02;
 
-    // Priority matters. A pinch is a *contact*, even when the middle finger
-    // happens to be extended — people do not fold the other three fingers to
-    // draw. So the pinch wins, and "two fingers" means two fingers up with the
-    // thumb clearly away (not pinching).
     const pinching =
       pinchDistance < (this.contact ? this.config.releaseThreshold : this.config.tapThreshold);
 
-    if (!this.contact && indexExt && middleExt && !pinching) {
-      return this.twoFinger(landmarks, point, pinchDistance);
+    const openPalm = indexExt && middleExt && ringExt && pinkyExt && thumbExt && !pinching;
+    const fist = !indexExt && !middleExt && !ringExt && !pinkyExt && !pinching;
+
+    // Two fingers up (V-sign / scroll & zoom): index + middle extended, ring & pinky curled.
+    if (!this.contact && indexExt && middleExt && !ringExt && !pinkyExt && !pinching) {
+      return this.twoFinger(landmarks, point, palmCenter, pinchDistance, handSize);
     }
 
-    // ---- one finger ----
+    // Open palm erase in air-touch mode (all 5 fingers open, clearly not pinching).
+    if (!this.contact && openPalm) {
+      this.lastSpread = null;
+      this.scrollAnchor = null;
+      this.lastScrollY = null;
+      return {
+        ...IDLE,
+        action: 'erase',
+        point: palmCenter,
+        palmCenter,
+        pinchDistance,
+        handSize,
+      };
+    }
+
+    // Closed fist (grab / rest cursor without writing).
+    if (!this.contact && fist) {
+      this.lastSpread = null;
+      this.scrollAnchor = null;
+      this.lastScrollY = null;
+      return {
+        ...IDLE,
+        action: 'grab',
+        point: palmCenter,
+        palmCenter,
+        pinchDistance,
+        handSize,
+      };
+    }
+
+    // ---- one finger (hover, pinch-write, tap, long-press) ----
     this.lastSpread = null;
     this.scrollAnchor = null;
-
+    this.lastScrollY = null;
     let tap = false;
+
     if (!this.contact && indexExt && pinching) {
-      // Touch down.
       this.contact = true;
       this.contactSince = nowMs;
       this.startPoint = { ...point };
       this.maxMoved = 0;
       this.longPressFired = false;
     } else if (this.contact && (!indexExt || pinchDistance > this.config.releaseThreshold)) {
-      // Lift. A short, still touch is a tap — it must not leave a dot behind.
       tap =
         nowMs - this.contactSince <= this.config.tapMaxMs &&
         this.maxMoved < this.config.stillTolerance;
       this.contact = false;
       this.longPressFired = false;
-      // Two fingers arriving can also be what ended the contact, in which case
-      // this same frame should start scrolling rather than return nothing.
-      if (indexExt && middleExt) return { ...this.twoFinger(landmarks, point, pinchDistance), tap };
+      if (indexExt && middleExt && !ringExt && !pinkyExt) {
+        return { ...this.twoFinger(landmarks, point, palmCenter, pinchDistance, handSize), tap };
+      }
     }
 
-    if (!this.contact) return { ...IDLE, point, tap, pinchDistance };
+    if (!this.contact) {
+      return {
+        ...IDLE,
+        action: indexExt ? 'hover' : 'none',
+        point,
+        palmCenter,
+        tap,
+        pinchDistance,
+        handSize,
+      };
+    }
 
     this.maxMoved = Math.max(
       this.maxMoved,
       Math.hypot(point.x - this.startPoint.x, point.y - this.startPoint.y),
     );
     const still = this.maxMoved < this.config.stillTolerance;
+    const heldMs = Math.max(0, nowMs - this.contactSince);
+    const holdProgress = still ? Math.min(1, heldMs / Math.max(this.config.longPressMs, 1)) : 0;
     let longPress = false;
-    if (!this.longPressFired && nowMs - this.contactSince >= this.config.longPressMs && still) {
+    if (!this.longPressFired && heldMs >= this.config.longPressMs && still) {
       longPress = true;
       this.longPressFired = true;
     }
@@ -206,47 +263,52 @@ export class TouchGestureClassifier {
     return {
       action: longPress ? 'pause' : 'point',
       point,
+      palmCenter,
       tap: false,
       pageDelta: 0,
+      scrollDeltaY: 0,
       zoomFactor: 1,
+      zoomDirection: null,
       contact: true,
       twoFingers: false,
       pinchDistance,
+      handSize,
+      holdProgress,
     };
   }
 
-  /** Two fingers up: scroll by vertical travel, zoom by spread change. */
   private twoFinger(
     landmarks: Landmark[],
     point: { x: number; y: number },
+    palmCenter: { x: number; y: number },
     pinchDistance: number,
+    handSize: number,
   ): TouchFrame {
-    // Two fingers cancel a one-finger gesture that was in progress.
     this.contact = false;
     this.longPressFired = false;
-
-    const wrist = landmarks[WRIST] ?? { ...point, z: 0 };
     const indexTip = landmarks[INDEX_TIP] ?? { ...point, z: 0 };
     const middleTip = landmarks[MIDDLE_TIP] ?? { ...point, z: 0 };
-    const handSize = Math.max(dist(wrist, landmarks[MIDDLE_MCP] ?? wrist), 1e-6);
     const spread = Math.max(dist(indexTip, middleTip) / handSize, 1e-6);
 
-    // Zoom first: a change in spread is unambiguous, and a simultaneous scroll
-    // would fight it.
     let zoomFactor = 1;
+    let zoomDirection: 'in' | 'out' | null = null;
     if (this.lastSpread !== null) {
       const ratio = spread / this.lastSpread;
       if (Math.abs(ratio - 1) > this.config.zoomStep) {
         zoomFactor = 1 + (ratio - 1) * this.config.zoomSensitivity;
+        zoomDirection = zoomFactor > 1 ? 'in' : 'out';
       }
     }
     this.lastSpread = spread;
 
     let pageDelta = 0;
+    let scrollDeltaY = 0;
     if (zoomFactor === 1) {
-      // Scroll: fingers moving down the frame pulls the next page in, the same
-      // direction as dragging a page with two fingers on a touchscreen.
       if (this.scrollAnchor === null) this.scrollAnchor = point.y;
+      if (this.lastScrollY !== null) {
+        scrollDeltaY = point.y - this.lastScrollY;
+      }
+      this.lastScrollY = point.y;
       const travel = point.y - this.scrollAnchor;
       if (Math.abs(travel) > this.config.scrollStep) {
         pageDelta = travel > 0 ? 1 : -1;
@@ -254,18 +316,26 @@ export class TouchGestureClassifier {
       }
     } else {
       this.scrollAnchor = point.y;
+      this.lastScrollY = point.y;
     }
 
-    const action: TouchAction = zoomFactor !== 1 ? 'zoom' : pageDelta !== 0 ? 'scroll' : 'none';
+    const action: TouchAction =
+      zoomFactor !== 1 ? 'zoom' : pageDelta !== 0 || Math.abs(scrollDeltaY) > 0.004 ? 'scroll' : 'scroll';
+
     return {
       action,
       point,
+      palmCenter,
       tap: false,
       pageDelta,
+      scrollDeltaY,
       zoomFactor,
+      zoomDirection,
       contact: false,
       twoFingers: true,
       pinchDistance,
+      handSize,
+      holdProgress: 0,
     };
   }
 }

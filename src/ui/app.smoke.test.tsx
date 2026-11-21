@@ -51,6 +51,9 @@ describe('tutorial reacts to live gestures', () => {
   it('completes the write exercise when the tracker reports pen-down', async () => {
     const { useStore } = await import('../store/useStore');
     const { default: App } = await import('../App');
+    // This test exercises the air-mode vocabulary (hover → write); set it
+    // explicitly so it does not depend on the current default gesture mode.
+    useStore.getState().updateSettings({ gestureMode: 'air' });
     render(<App />);
     useStore.setState({ tutorialOpen: true });
     const next = () => fireEvent.click(screen.getByRole('button', { name: 'Next' }));
@@ -76,6 +79,9 @@ describe('settings completeness', () => {
   it('offers calibration re-run and every documented gesture toggle', async () => {
     const { useStore } = await import('../store/useStore');
     const { default: App } = await import('../App');
+    // The swipe/fist/erase toggles only render in air mode; set it explicitly
+    // so this completeness check does not depend on the default mode.
+    useStore.getState().updateSettings({ gestureMode: 'air' });
     render(<App />);
     fireEvent.click(await screen.findByRole('button', { name: 'Settings' }));
 
@@ -264,18 +270,17 @@ describe('sidecar identity (ADR-020)', () => {
 });
 
 describe('camera panel', () => {
-  it('hides the self-view by default and can show it again', async () => {
+  it('shows the self-view by default and can hide it again', async () => {
     const { useStore } = await import('../store/useStore');
     const { DEFAULT_SETTINGS } = await import('../core/types');
     const { default: App } = await import('../App');
     useStore.getState().updateSettings({ showPreview: DEFAULT_SETTINGS.showPreview });
     render(<App />);
-    const toggle = await screen.findByRole('button', { name: 'Show camera preview' });
-    // Off by default on every viewport — watching yourself is opt-in.
-    expect(toggle.getAttribute('aria-expanded')).toBe('false');
-    fireEvent.click(toggle);
+    const toggle = await screen.findByRole('button', { name: 'Hide camera preview' });
     expect(toggle.getAttribute('aria-expanded')).toBe('true');
-    expect(screen.getByRole('button', { name: 'Hide camera preview' })).toBeTruthy();
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(screen.getByRole('button', { name: 'Show camera preview' })).toBeTruthy();
   });
 
   it('keeps the tracking controls in the panel while the self-view is hidden', async () => {

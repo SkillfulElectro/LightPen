@@ -7,7 +7,7 @@
 import { create } from 'zustand';
 import { AnnotationStore } from '../core/annotations';
 import { sanitizeSettings } from '../core/settings';
-import type { PageSize, Settings, Stroke } from '../core/types';
+import type { AirCursorState, PageSize, Settings, Stroke, TutorialPace } from '../core/types';
 import { DEFAULT_SETTINGS } from '../core/types';
 import { saveSidecar } from '../platform/tauri';
 import { createSidecarWriter, restoreAnnotations as restoreFromSidecar } from './sidecar';
@@ -86,8 +86,12 @@ interface AppState {
   shortcutsOpen: boolean;
   setShortcutsOpen: (open: boolean) => void;
 
+  /** Tutorial pacing cadence (guided/normal/quick). */
+  tutorialPace: TutorialPace;
+  setTutorialPace: (pace: TutorialPace) => void;
   /** Hot-path refs (no re-renders). */
   handCursor: { x: number; y: number; kind: string } | null;
+  airCursor: AirCursorState | null;
   activeStroke: Stroke | null;
 }
 
@@ -240,7 +244,10 @@ export const useStore = create<AppState>((set, get) => ({
   shortcutsOpen: false,
   setShortcutsOpen: (open) => set({ shortcutsOpen: open }),
 
+  tutorialPace: 'guided',
+  setTutorialPace: (tutorialPace) => set({ tutorialPace }),
   handCursor: null,
+  airCursor: null,
   activeStroke: null,
 }));
 

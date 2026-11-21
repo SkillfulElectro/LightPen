@@ -39,7 +39,7 @@ const catalogue = new Set(
 );
 
 /** Keys composed at runtime (e.g. `camera.hint${suffix}`), checked by prefix below. */
-const DYNAMIC_PREFIXES = ['camera.', 'tutorial.ex', 'viewer.'];
+const DYNAMIC_PREFIXES = ['camera.', 'tutorial.ex', 'tutorial.pace', 'viewer.'];
 
 describe('translation usage', () => {
   it('every key used in the source exists in en.json', () => {
