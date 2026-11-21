@@ -7,3 +7,4 @@ export * from './docIdentity';
 export * from './annotations';
 export * from './settings';
 export * from './pdfExport';
+export * from './airTouchSimulator';

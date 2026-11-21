@@ -249,3 +249,36 @@ export function runFrameLoop(
 export function hasLiveFrames(video: HTMLVideoElement): boolean {
   return video.readyState >= 2 && video.videoWidth > 0 && video.videoHeight > 0;
 }
+
+/**
+ * Wait until the <video> element actually has decoded frame dimensions before
+ * starting MediaPipe detection, avoiding premature 0x0 frame failures.
+ */
+export function waitForVideoFrames(video: HTMLVideoElement, timeoutMs = 4000): Promise<boolean> {
+  if (hasLiveFrames(video)) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (ok: boolean) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      resolve(ok);
+    };
+    const check = () => {
+      if (hasLiveFrames(video)) finish(true);
+    };
+    const onEvent = () => check();
+    video.addEventListener('loadeddata', onEvent);
+    video.addEventListener('playing', onEvent);
+    video.addEventListener('resize', onEvent);
+    const poll = setInterval(check, 60);
+    const timer = setTimeout(() => finish(hasLiveFrames(video)), timeoutMs);
+    const cleanup = () => {
+      clearInterval(poll);
+      clearTimeout(timer);
+      video.removeEventListener('loadeddata', onEvent);
+      video.removeEventListener('playing', onEvent);
+      video.removeEventListener('resize', onEvent);
+    };
+  });
+}

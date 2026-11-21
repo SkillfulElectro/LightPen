@@ -46,6 +46,13 @@ function dist(a: Landmark, b: Landmark): number {
   return Math.hypot(dx, dy);
 }
 
+function pinchDist3D(a: Landmark, b: Landmark): number {
+  const dx = a.x - b.x;
+  const dy = a.y - b.y;
+  const dz = ((a.z ?? 0) - (b.z ?? 0)) * 0.35;
+  return Math.hypot(dx, dy, dz);
+}
+
 /** Stateful classifier: keeps pinch hysteresis, swipe history and fist timer. */
 export class GestureClassifier {
   private penDown = false;
@@ -92,8 +99,14 @@ export class GestureClassifier {
     const middleMcp = landmarks[MIDDLE_MCP] ?? wrist;
     const thumbTip = landmarks[THUMB_TIP] ?? wrist;
 
-    const handSize = Math.max(dist(wrist, middleMcp), 1e-6);
-    const pinchDistance = dist(thumbTip, indexTipLm) / handSize;
+    const indexMcp = landmarks[5] ?? middleMcp;
+    const pinkyMcp = landmarks[17] ?? middleMcp;
+    const palmWidth = dist(indexMcp, pinkyMcp);
+    const handSize = Math.max(dist(wrist, middleMcp), palmWidth * 0.72, 1e-6);
+    const thumbIp = landmarks[3] ?? thumbTip;
+    const tipPinch = pinchDist3D(thumbTip, indexTipLm) / handSize;
+    const padPinch = (pinchDist3D(thumbIp, indexTipLm) / handSize) * 1.15;
+    const pinchDistance = Math.min(tipPinch, padPinch);
     const palmCenter = {
       x: (wrist.x + middleMcp.x) / 2,
       y: (wrist.y + middleMcp.y) / 2,

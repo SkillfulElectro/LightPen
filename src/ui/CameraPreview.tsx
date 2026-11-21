@@ -1,14 +1,17 @@
 /**
  * Camera preview + hand-tracking loop.
- * - Picture-in-picture video with hand-skeleton overlay.
- * - Gesture → ink mapping through One Euro smoothing + calibration.
- * - Adaptive quality: drops to half-rate detection when FPS is low.
- * - All processing on-device; stream stops when tracking stops or the
- *   page is hidden (privacy requirement).
+ * - Live face & hand video with 21-point hand-skeleton overlay.
+ * - Real-time air touch simulation & dynamic mouse cursor styling.
+ * - Live store reads inside frame loop (no stale closures on tool/color/mode changes).
+ * - Runtime GPU -> CPU automatic fallback so detection works reliably on every device.
  */
-
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import {
+  AirTouchEventBridge,
+  normalizedToViewport,
+  resolveAirCursorStyle,
+} from '../core/airTouchSimulator';
 import { addPoint, createStroke } from '../core/annotations';
 import { videoWrapClass } from '../core/cameraDom';
 import {
@@ -19,8 +22,8 @@ import {
   trackingHint,
 } from '../core/coords';
 import { GestureClassifier } from '../core/gesture';
-import { DEFAULT_TOUCH_CONFIG, TouchGestureClassifier } from '../core/touchGestures';
 import { OneEuroPoint } from '../core/oneEuro';
+import { DEFAULT_TOUCH_CONFIG, TouchGestureClassifier } from '../core/touchGestures';
 import {
   diagnoseTracker,
   diagnosticText,
@@ -28,7 +31,7 @@ import {
   TRACKER_FAILURE_MESSAGE_KEY,
   type TrackerFailure,
 } from '../core/trackerHealth';
-import type { PageSize, Stroke } from '../core/types';
+import type { GestureKind, PageSize, Stroke } from '../core/types';
 import {
   CAMERA_ERROR_MESSAGE_KEY,
   CameraError,
@@ -36,11 +39,22 @@ import {
   runFrameLoop,
   startCamera,
   stopCamera,
+  waitForVideoFrames,
   type CameraDevice,
 } from '../platform/camera';
-import { closeHandLandmarker, detectHand, getHandLandmarker } from '../platform/mediapipe';
+import {
+  closeHandLandmarker,
+  detectHand,
+  fallbackToCpuLandmarker,
+  getActiveDelegate,
+  getHandLandmarker,
+} from '../platform/mediapipe';
 import { useStore } from '../store/useStore';
-import { registerTrackingStarter } from './trackingHandle';
+import {
+  publishCameraStream,
+  publishLiveFrame,
+  registerTrackingStarter,
+} from './trackingHandle';
 
 interface Props {
   pageSize: PageSize;
@@ -53,20 +67,15 @@ export default function CameraPreview({ pageSize, onGesture }: Props) {
   const overlayRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const stopLoopRef = useRef<(() => void) | null>(null);
+  const pageSizeRef = useRef<PageSize>(pageSize);
+  pageSizeRef.current = pageSize;
+
   const [cameras, setCameras] = useState<CameraDevice[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [modelMissing, setModelMissing] = useState(false);
-  // Why no frames arrive, when that happens. Filled by the health check below
-  // so a dead tracker explains itself instead of sitting at "0 FPS".
   const [failure, setFailure] = useState<TrackerFailure | null>(null);
   const [failureDetail, setFailureDetail] = useState<string | null>(null);
-  // The self-view is opt-in (persisted `showPreview`, off by default): you
-  // don't need to watch yourself to write — tracking, the hand cursor and
-  // the hints all work with the preview hidden, on desktop and mobile
-  // alike. The toggle below works in both layouts, and the live badge in
-  // the header stays visible while the camera is on even when the
-  // preview itself is hidden (hiding your face must not hide that the
-  // camera is running).
+
   const updateSettings = useStore((s) => s.updateSettings);
   const active = useStore((s) => s.tracking.active);
   const fps = useStore((s) => s.tracking.fps);
@@ -74,7 +83,6 @@ export default function CameraPreview({ pageSize, onGesture }: Props) {
   const settings = useStore((s) => s.settings);
   const collapsed = !settings.showPreview;
   const setTracking = useStore((s) => s.setTracking);
-  const tool = useStore((s) => s.tool);
 
   const refreshCameras = useCallback(async () => {
     setCameras(await listCameras());
@@ -91,7 +99,17 @@ export default function CameraPreview({ pageSize, onGesture }: Props) {
     stopLoopRef.current = null;
     stopCamera(streamRef.current);
     streamRef.current = null;
-    useStore.setState({ handCursor: null, activeStroke: null });
+    publishCameraStream(null);
+    publishLiveFrame({
+      landmarks: null,
+      mirrored: useStore.getState().settings.mirrored,
+      gestureKind: 'none',
+      pinchDistance: 1,
+      handPresent: false,
+      indexTip: null,
+      contact: false,
+    });
+    useStore.setState({ handCursor: null, airCursor: null, activeStroke: null });
     setTracking({ active: false, fps: 0, handPresent: false, hint: null });
   }, [setTracking]);
 
@@ -101,15 +119,18 @@ export default function CameraPreview({ pageSize, onGesture }: Props) {
     setFailure(null);
     setFailureDetail(null);
     try {
-      const stream = await startCamera(settings.cameraId);
+      const initialSettings = useStore.getState().settings;
+      const stream = await startCamera(initialSettings.cameraId);
       streamRef.current = stream;
+      publishCameraStream(stream);
       const video = videoRef.current;
       if (!video) throw new CameraError('unknown', 'Video element missing.');
       video.srcObject = stream;
       await video.play();
+      await waitForVideoFrames(video, 4000);
       await refreshCameras();
 
-      let landmarker;
+      let landmarker: Awaited<ReturnType<typeof getHandLandmarker>>;
       try {
         landmarker = await getHandLandmarker();
       } catch {
@@ -118,35 +139,39 @@ export default function CameraPreview({ pageSize, onGesture }: Props) {
         return;
       }
 
-      const classifier = new GestureClassifier({
-        pinchThreshold: settings.pinchThreshold,
-        pinchReleaseThreshold: settings.pinchReleaseThreshold,
-        enableErase: settings.enableErase,
-        enablePageSwipe: settings.enablePageSwipe,
-        enablePauseFist: settings.enablePauseFist,
+      let classifier = new GestureClassifier({
+        pinchThreshold: initialSettings.pinchThreshold,
+        pinchReleaseThreshold: initialSettings.pinchReleaseThreshold,
+        enableErase: initialSettings.enableErase,
+        enablePageSwipe: initialSettings.enablePageSwipe,
+        enablePauseFist: initialSettings.enablePauseFist,
       });
-      // Touch mode uses its own classifier; only one of the two runs per frame,
-      // decided by `settings.gestureMode`.
-      const touch = new TouchGestureClassifier({
+      let touch = new TouchGestureClassifier({
         ...DEFAULT_TOUCH_CONFIG,
-        tapThreshold: settings.pinchThreshold,
-        releaseThreshold: settings.pinchReleaseThreshold,
-        zoomSensitivity: settings.zoomSensitivity,
+        tapThreshold: initialSettings.pinchThreshold,
+        releaseThreshold: initialSettings.pinchReleaseThreshold,
+        zoomSensitivity: initialSettings.zoomSensitivity,
       });
-      const smoother = new OneEuroPoint({
-        minCutoff: settings.smoothingMinCutoff,
-        beta: settings.smoothingBeta,
-        dCutoff: settings.smoothingDCutoff,
+      let smoother = new OneEuroPoint({
+        minCutoff: initialSettings.smoothingMinCutoff,
+        beta: initialSettings.smoothingBeta,
+        dCutoff: initialSettings.smoothingDCutoff,
       });
+
+      let lastThresholdKey = `${initialSettings.pinchThreshold}:${initialSettings.pinchReleaseThreshold}:${initialSettings.enableErase}:${initialSettings.enablePageSwipe}:${initialSettings.enablePauseFist}:${initialSettings.zoomSensitivity}`;
+      let lastSmoothKey = `${initialSettings.smoothingMinCutoff}:${initialSettings.smoothingBeta}:${initialSettings.smoothingDCutoff}`;
+
+      const airBridge = new AirTouchEventBridge();
+      let tapPulseSeq = 0;
       let activeStroke: Stroke | null = null;
-      // Coarse offscreen canvas for luminance sampling (never leaves memory).
+      let switchingToCpu = false;
+
       const lightCanvas = document.createElement('canvas');
       lightCanvas.width = 64;
       lightCanvas.height = 48;
       const lightCtx = lightCanvas.getContext('2d', { willReadFrequently: true });
       let lowLight = false;
       let lastLightCheck = 0;
-
       let lostFrames = 0;
       let frameSkip = 0;
       let adaptiveSkip = 1;
@@ -159,16 +184,10 @@ export default function CameraPreview({ pageSize, onGesture }: Props) {
         useStore.setState({ activeStroke: null });
       };
 
-      // Health accounting for `diagnoseTracker`: a detector exception must not
-      // end tracking (WebKitGTK throws "no video frame" on a single bad frame),
-      // and a long gap must be visible as a number rather than a blank panel.
       let detectorErrors = 0;
       let consecutiveErrors = 0;
       let fps = 0;
       let reportedFailure: TrackerFailure | null = null;
-      // Give a cold start a moment: the first frame of a 4K/VP8 stream can take
-      // longer than the first FPS tick, and crying "no frames" then would be a
-      // false alarm on a working camera.
       const healthGraceMs = 2500;
       const loopStartedAt = performance.now();
 
@@ -184,7 +203,7 @@ export default function CameraPreview({ pageSize, onGesture }: Props) {
         };
         const diagnosis = diagnoseTracker(sample) ?? longHandAbsence(sample);
         const next = diagnosis ? diagnosis.failure : null;
-        if (next === reportedFailure) return; // state changes once, not per second
+        if (next === reportedFailure) return;
         reportedFailure = next;
         setFailure(next);
         setFailureDetail(diagnosis ? diagnosticText(diagnosis, navigator.userAgent) : null);
@@ -196,34 +215,85 @@ export default function CameraPreview({ pageSize, onGesture }: Props) {
           frameSkip += 1;
           if (frameSkip < adaptiveSkip) return;
           frameSkip = 0;
+
+          const liveState = useStore.getState();
+          const liveSettings = liveState.settings;
+          const liveTool = liveState.tool;
+          const livePageSize = pageSizeRef.current;
+
+          // Hot-sync classifier & smoother whenever the user adjusts sliders live.
+          const tKey = `${liveSettings.pinchThreshold}:${liveSettings.pinchReleaseThreshold}:${liveSettings.enableErase}:${liveSettings.enablePageSwipe}:${liveSettings.enablePauseFist}:${liveSettings.zoomSensitivity}`;
+          if (tKey !== lastThresholdKey) {
+            lastThresholdKey = tKey;
+            classifier = new GestureClassifier({
+              pinchThreshold: liveSettings.pinchThreshold,
+              pinchReleaseThreshold: liveSettings.pinchReleaseThreshold,
+              enableErase: liveSettings.enableErase,
+              enablePageSwipe: liveSettings.enablePageSwipe,
+              enablePauseFist: liveSettings.enablePauseFist,
+            });
+            touch = new TouchGestureClassifier({
+              ...DEFAULT_TOUCH_CONFIG,
+              tapThreshold: liveSettings.pinchThreshold,
+              releaseThreshold: liveSettings.pinchReleaseThreshold,
+              zoomSensitivity: liveSettings.zoomSensitivity,
+            });
+          }
+          const sKey = `${liveSettings.smoothingMinCutoff}:${liveSettings.smoothingBeta}:${liveSettings.smoothingDCutoff}`;
+          if (sKey !== lastSmoothKey) {
+            lastSmoothKey = sKey;
+            smoother = new OneEuroPoint({
+              minCutoff: liveSettings.smoothingMinCutoff,
+              beta: liveSettings.smoothingBeta,
+              dCutoff: liveSettings.smoothingDCutoff,
+            });
+          }
+
           let result;
           try {
-            result = detectHand(landmarker, video, nowMs);
+            result = detectHand(landmarker, video, nowMs, liveSettings.dominantHand);
             consecutiveErrors = 0;
           } catch {
             detectorErrors += 1;
             consecutiveErrors += 1;
-            // Keep the overlay honest: no stale skeleton on a failed frame.
-            drawOverlay(video, null);
-            if (consecutiveErrors === 15) {
-              // ~0.5 s of unbroken failures is not a hiccup; report it now
-              // rather than waiting for the next FPS tick.
-              reportHealth();
+            drawOverlay(video, null, liveSettings.mirrored);
+            // Automatic GPU -> CPU recovery if GPU WebGL delegate fails at runtime.
+            if (consecutiveErrors === 3 && getActiveDelegate() === 'GPU' && !switchingToCpu) {
+              switchingToCpu = true;
+              void fallbackToCpuLandmarker()
+                .then((cpuLm) => {
+                  landmarker = cpuLm;
+                  consecutiveErrors = 0;
+                })
+                .finally(() => {
+                  switchingToCpu = false;
+                });
             }
+            if (consecutiveErrors === 15) reportHealth();
             return;
           }
-          drawOverlay(video, result?.landmarks ?? null);
+
+          drawOverlay(video, result?.landmarks ?? null, liveSettings.mirrored);
+
           if (!result) {
             lostFrames += 1;
-            // After ~1 s without a hand, tell the user it is probably out of frame.
             setTracking({ handPresent: false, hint: lostFrames > 30 ? 'out-of-frame' : null });
-            // Debounce hand-loss: tolerate a few dropped frames before ending a stroke.
             if (lostFrames > 8) finishStroke();
-            useStore.setState({ handCursor: null });
+            airBridge.clearHover();
+            useStore.setState({ handCursor: null, airCursor: null });
+            publishLiveFrame({
+              landmarks: null,
+              mirrored: liveSettings.mirrored,
+              gestureKind: 'none',
+              pinchDistance: 1,
+              handPresent: false,
+              indexTip: null,
+              contact: false,
+            });
             return;
           }
           lostFrames = 0;
-          // Low-light hint: sample a small grid at most twice a second.
+
           if (lightCtx && nowMs - lastLightCheck > 500) {
             lastLightCheck = nowMs;
             lightCtx.drawImage(video, 0, 0, lightCanvas.width, lightCanvas.height);
@@ -238,97 +308,200 @@ export default function CameraPreview({ pageSize, onGesture }: Props) {
             );
             lowLight = isLowLight(brightness);
           }
-          // Dominant-hand filtering.
-          if (
-            settings.dominantHand !== 'auto' &&
-            result.handedness.toLowerCase() !== settings.dominantHand
-          ) {
-            setTracking({ handPresent: false });
-            return;
-          }
-          setTracking({ handPresent: true });
 
-          if (settings.gestureMode === 'touch') {
+          setTracking({ handPresent: true });
+          const page = useStore.getState().currentPage;
+          const tutorialOpen = useStore.getState().tutorialOpen;
+
+          const updateAirCursor = (
+            normPt: { x: number; y: number },
+            gestureKind: GestureKind,
+            holdProgress = 0,
+            didTap = false,
+          ) => {
+            const vp = normalizedToViewport(
+              normPt,
+              liveSettings.calibration,
+              liveSettings.mirrored,
+              window.innerWidth,
+              window.innerHeight,
+            );
+            const { interactive } = airBridge.move(vp.x, vp.y);
+            if (didTap) {
+              tapPulseSeq += 1;
+              airBridge.tap(vp.x, vp.y);
+            }
+            const desc = resolveAirCursorStyle(gestureKind, liveTool, interactive !== null);
+            useStore.setState({
+              airCursor: {
+                screenX: vp.x,
+                screenY: vp.y,
+                normalizedX: normPt.x,
+                normalizedY: normPt.y,
+                style: desc.style,
+                cssCursor: desc.cssCursor,
+                label: desc.label,
+                color: liveSettings.penColor,
+                active: gestureKind === 'pen-down' || gestureKind === 'erase' || gestureKind === 'tap',
+                holdProgress,
+                tapPulseSeq,
+                overInteractive: interactive !== null,
+              },
+            });
+          };
+
+          if (liveSettings.gestureMode === 'touch') {
             const frame = touch.classify(result.landmarks, nowMs);
-            const page = useStore.getState().currentPage;
+            const smoothed = smoother.filter(frame.point.x, frame.point.y, nowMs);
+            const where = clampToPage(
+              cameraToPage(smoothed, liveSettings.calibration, livePageSize, liveSettings.mirrored),
+              livePageSize,
+            );
+            setTracking({
+              hint: trackingHint(frame.handSize) ?? (lowLight ? 'low-light' : null),
+            });
+
+            let gestureKind: GestureKind = 'hover';
+
             if (frame.twoFingers) {
-              // Two fingers: scroll turns pages, spread zooms. Never draws.
               finishStroke();
-              if (frame.pageDelta !== 0) {
-                useStore.getState().setCurrentPage(page + frame.pageDelta);
-                onGesture?.(frame.pageDelta > 0 ? 'scroll-next' : 'scroll-prev');
-              }
               if (frame.zoomFactor !== 1) {
+                gestureKind = frame.zoomDirection === 'out' ? 'zoom-out' : 'zoom-in';
                 useStore.getState().setZoom(useStore.getState().zoom * frame.zoomFactor);
                 onGesture?.('zoom');
-              }
-            } else if (frame.contact) {
-              const where = clampToPage(
-                cameraToPage(frame.point, settings.calibration, pageSize, settings.mirrored),
-                pageSize,
-              );
-              const erasing = tool === 'eraser';
-              if (erasing) {
-                finishStroke();
-                useStore.getState().eraseAt(page, where, 18);
               } else {
-                if (activeStroke && activeStroke.page !== page) finishStroke();
-                if (!activeStroke) {
-                  activeStroke = createStroke(page, settings.penColor, settings.penWidth, where);
-                  useStore.setState({ activeStroke });
-                } else {
-                  addPoint(activeStroke, where);
+                gestureKind = 'scroll';
+                if (Math.abs(frame.scrollDeltaY) > 0.003) {
+                  const vp = normalizedToViewport(
+                    smoothed,
+                    liveSettings.calibration,
+                    liveSettings.mirrored,
+                    window.innerWidth,
+                    window.innerHeight,
+                  );
+                  airBridge.scroll(vp.x, vp.y, frame.scrollDeltaY);
+                }
+                if (frame.pageDelta !== 0) {
+                  useStore.getState().setCurrentPage(page + frame.pageDelta);
+                  onGesture?.(frame.pageDelta > 0 ? 'scroll-next' : 'scroll-prev');
                 }
               }
-              setTracking({
-                hint: trackingHint(frame.pinchDistance) ?? (lowLight ? 'low-light' : null),
-              });
-              useStore.setState({
-                handCursor: { x: where.x, y: where.y, kind: erasing ? 'erase' : 'pen-down' },
-              });
-            } else {
+              useStore.setState({ handCursor: { x: where.x, y: where.y, kind: gestureKind } });
+              updateAirCursor(smoothed, gestureKind, 0, false);
+            } else if (frame.action === 'erase') {
               finishStroke();
-              useStore.setState({ handCursor: null });
-              if (frame.tap) onGesture?.('tap');
+              gestureKind = 'erase';
+              if (!tutorialOpen) {
+                const palmPage = clampToPage(
+                  cameraToPage(
+                    frame.palmCenter,
+                    liveSettings.calibration,
+                    livePageSize,
+                    liveSettings.mirrored,
+                  ),
+                  livePageSize,
+                );
+                useStore.getState().eraseAt(page, palmPage, 22);
+                useStore.setState({ handCursor: { x: palmPage.x, y: palmPage.y, kind: 'erase' } });
+              }
+              onGesture?.('erase');
+              updateAirCursor(frame.palmCenter, 'erase', 0, false);
+            } else if (frame.action === 'grab') {
+              finishStroke();
+              gestureKind = 'fist';
+              useStore.setState({ handCursor: { x: where.x, y: where.y, kind: 'fist' } });
+              updateAirCursor(frame.palmCenter, 'fist', 0, false);
+            } else if (frame.contact) {
+              const erasing = liveTool === 'eraser';
+              gestureKind = erasing ? 'erase' : 'pen-down';
+              if (!tutorialOpen) {
+                if (erasing) {
+                  finishStroke();
+                  useStore.getState().eraseAt(page, where, 18);
+                } else {
+                  if (activeStroke && activeStroke.page !== page) finishStroke();
+                  if (!activeStroke) {
+                    activeStroke = createStroke(
+                      page,
+                      liveSettings.penColor,
+                      liveSettings.penWidth,
+                      where,
+                    );
+                    useStore.setState({ activeStroke });
+                  } else {
+                    addPoint(activeStroke, where);
+                  }
+                }
+              }
+              onGesture?.(gestureKind);
+              useStore.setState({ handCursor: { x: where.x, y: where.y, kind: gestureKind } });
+              updateAirCursor(smoothed, gestureKind, frame.holdProgress, false);
               if (frame.action === 'pause') {
                 onGesture?.('pause');
                 stop();
+                return;
               }
+            } else {
+              finishStroke();
+              gestureKind = frame.tap ? 'tap' : 'hover';
+              if (frame.tap) onGesture?.('tap');
+              else onGesture?.('hover');
+              useStore.setState({ handCursor: { x: where.x, y: where.y, kind: gestureKind } });
+              updateAirCursor(smoothed, gestureKind, 0, frame.tap);
             }
+
+            publishLiveFrame({
+              landmarks: result.landmarks,
+              mirrored: liveSettings.mirrored,
+              gestureKind,
+              pinchDistance: frame.pinchDistance,
+              handPresent: true,
+              indexTip: smoothed,
+              contact: frame.contact,
+            });
             return;
           }
 
+          // ---- Air gesture mode ----
           const g = classifier.classify(result.landmarks, nowMs);
           setTracking({ hint: trackingHint(g.handSize) ?? (lowLight ? 'low-light' : null) });
           onGesture?.(g.kind);
 
           const smoothed = smoother.filter(g.indexTip.x, g.indexTip.y, nowMs);
           const pagePoint = clampToPage(
-            cameraToPage(smoothed, settings.calibration, pageSize, settings.mirrored),
-            pageSize,
+            cameraToPage(smoothed, liveSettings.calibration, livePageSize, liveSettings.mirrored),
+            livePageSize,
           );
           const palmPage = clampToPage(
-            cameraToPage(g.palmCenter, settings.calibration, pageSize, settings.mirrored),
-            pageSize,
+            cameraToPage(
+              g.palmCenter,
+              liveSettings.calibration,
+              livePageSize,
+              liveSettings.mirrored,
+            ),
+            livePageSize,
           );
 
-          // Read the live page index: a swipe inside this loop changes it, and a
-          // captured value would keep drawing on the page we left.
-          const page = useStore.getState().currentPage;
           if (activeStroke && activeStroke.page !== page) finishStroke();
-
-          if (g.kind === 'pen-down') {
-            if (!activeStroke) {
-              activeStroke = createStroke(page, settings.penColor, settings.penWidth, pagePoint);
-              useStore.setState({ activeStroke });
+          if (!tutorialOpen) {
+            if (g.kind === 'pen-down') {
+              if (!activeStroke) {
+                activeStroke = createStroke(
+                  page,
+                  liveSettings.penColor,
+                  liveSettings.penWidth,
+                  pagePoint,
+                );
+                useStore.setState({ activeStroke });
+              } else {
+                addPoint(activeStroke, pagePoint);
+              }
+            } else if (g.kind === 'erase') {
+              finishStroke();
+              useStore.getState().eraseAt(page, palmPage, 20);
             } else {
-              addPoint(activeStroke, pagePoint);
+              finishStroke();
             }
-          } else if (g.kind === 'erase') {
-            finishStroke();
-            useStore.getState().eraseAt(page, palmPage, 18);
-          } else {
-            finishStroke();
           }
 
           if (g.swipe) {
@@ -339,8 +512,10 @@ export default function CameraPreview({ pageSize, onGesture }: Props) {
           if (g.pauseTriggered) {
             onGesture?.('pause');
             stop();
+            return;
           }
 
+          const cursorNorm = g.kind === 'erase' ? g.palmCenter : smoothed;
           useStore.setState({
             handCursor: {
               x: g.kind === 'erase' ? palmPage.x : pagePoint.x,
@@ -348,29 +523,39 @@ export default function CameraPreview({ pageSize, onGesture }: Props) {
               kind: g.kind,
             },
           });
+          updateAirCursor(cursorNorm, g.kind, 0, false);
+
+          publishLiveFrame({
+            landmarks: result.landmarks,
+            mirrored: liveSettings.mirrored,
+            gestureKind: g.kind,
+            pinchDistance: g.pinchDistance,
+            handPresent: true,
+            indexTip: smoothed,
+            contact: g.kind === 'pen-down',
+          });
         },
         (measuredFps) => {
           fps = measuredFps;
           setTracking({ fps: Math.round(measuredFps) });
-          // Adaptive quality: halve detection rate when FPS drops.
-          adaptiveSkip = measuredFps < 20 ? 2 : 1;
+          adaptiveSkip = measuredFps < 18 ? 2 : 1;
           reportHealth();
         },
       );
-      stopLoopRef.current = stopLoop;
+      stopLoopRef.current = () => {
+        airBridge.clearHover();
+        stopLoop();
+      };
       setTracking({ active: true });
     } catch (err) {
       if (err instanceof CameraError) setError(t(CAMERA_ERROR_MESSAGE_KEY[err.kind]));
       else setError(t('camera.unsupported'));
       stop();
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [settings, pageSize, stop, setTracking, onGesture]);
+  }, [refreshCameras, stop, setTracking, onGesture, t]);
 
-  // Let the permission dialog trigger tracking.
   useEffect(() => registerTrackingStarter(start), [start]);
 
-  // Privacy: stop the stream when the page is hidden.
   useEffect(() => {
     const onVisibility = () => {
       if (document.hidden) stop();
@@ -379,7 +564,6 @@ export default function CameraPreview({ pageSize, onGesture }: Props) {
     return () => document.removeEventListener('visibilitychange', onVisibility);
   }, [stop]);
 
-  // Cleanup on unmount.
   useEffect(() => {
     return () => {
       stop();
@@ -387,7 +571,11 @@ export default function CameraPreview({ pageSize, onGesture }: Props) {
     };
   }, [stop]);
 
-  const drawOverlay = (video: HTMLVideoElement, landmarks: { x: number; y: number }[] | null) => {
+  const drawOverlay = (
+    video: HTMLVideoElement,
+    landmarks: { x: number; y: number }[] | null,
+    mirrored: boolean,
+  ) => {
     const canvas = overlayRef.current;
     if (!canvas) return;
     const w = video.videoWidth || 320;
@@ -400,30 +588,14 @@ export default function CameraPreview({ pageSize, onGesture }: Props) {
     if (!ctx) return;
     ctx.clearRect(0, 0, w, h);
     if (!landmarks) return;
-    const mirrored = settings.mirrored;
     const px = (x: number) => (mirrored ? 1 - x : x) * w;
     const py = (y: number) => y * h;
     const connections: [number, number][] = [
-      [0, 1],
-      [1, 2],
-      [2, 3],
-      [3, 4],
-      [0, 5],
-      [5, 6],
-      [6, 7],
-      [7, 8],
-      [5, 9],
-      [9, 10],
-      [10, 11],
-      [11, 12],
-      [9, 13],
-      [13, 14],
-      [14, 15],
-      [15, 16],
-      [13, 17],
-      [17, 18],
-      [18, 19],
-      [19, 20],
+      [0, 1], [1, 2], [2, 3], [3, 4],
+      [0, 5], [5, 6], [6, 7], [7, 8],
+      [5, 9], [9, 10], [10, 11], [11, 12],
+      [9, 13], [13, 14], [14, 15], [15, 16],
+      [13, 17], [17, 18], [18, 19], [19, 20],
       [0, 17],
     ];
     ctx.strokeStyle = '#22c55e';
@@ -438,9 +610,11 @@ export default function CameraPreview({ pageSize, onGesture }: Props) {
     }
     ctx.stroke();
     ctx.fillStyle = '#22c55e';
-    for (const lm of landmarks) {
+    for (let i = 0; i < landmarks.length; i++) {
+      const lm = landmarks[i]!;
       ctx.beginPath();
-      ctx.arc(px(lm.x), py(lm.y), 3, 0, Math.PI * 2);
+      ctx.arc(px(lm.x), py(lm.y), i === 8 || i === 4 ? 5 : 3, 0, Math.PI * 2);
+      ctx.fillStyle = i === 8 ? '#e11d48' : i === 4 ? '#f59e0b' : '#22c55e';
       ctx.fill();
     }
   };

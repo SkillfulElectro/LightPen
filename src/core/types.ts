@@ -51,7 +51,49 @@ export interface CalibrationRect {
 export type Handedness = 'Left' | 'Right';
 
 /** Gestures the classifier can emit. */
-export type GestureKind = 'pen-down' | 'hover' | 'erase' | 'fist' | 'two-finger' | 'none';
+export type GestureKind =
+  | 'pen-down'
+  | 'hover'
+  | 'erase'
+  | 'fist'
+  | 'two-finger'
+  | 'tap'
+  | 'scroll'
+  | 'zoom-in'
+  | 'zoom-out'
+  | 'none';
+
+/** Dynamic mouse cursor visual style driven by air touch gestures. */
+export type AirCursorStyle =
+  | 'default'
+  | 'pointer'
+  | 'pen'
+  | 'eraser'
+  | 'tap'
+  | 'scroll'
+  | 'zoom-in'
+  | 'zoom-out'
+  | 'grab'
+  | 'pause';
+
+/** Live viewport-level air cursor state (updated imperatively at 60Hz). */
+export interface AirCursorState {
+  screenX: number;
+  screenY: number;
+  normalizedX: number;
+  normalizedY: number;
+  style: AirCursorStyle;
+  cssCursor: string;
+  label: string;
+  color: string;
+  active: boolean;
+  holdProgress: number;
+  tapPulseSeq: number;
+  overInteractive: boolean;
+}
+
+/** Speed / guidance cadence for the interactive tutorial. */
+export type TutorialPace = 'guided' | 'normal' | 'quick';
 
 /**
  * How the hand maps onto the page.
@@ -97,15 +139,15 @@ export interface Settings {
 }
 
 export const DEFAULT_SETTINGS: Settings = {
-  pinchThreshold: 0.32,
-  pinchReleaseThreshold: 0.45,
+  pinchThreshold: 0.42,
+  pinchReleaseThreshold: 0.56,
   smoothingMinCutoff: 1.2,
   smoothingBeta: 0.02,
   smoothingDCutoff: 1.0,
   dominantHand: 'auto',
   cameraId: null,
   mirrored: true,
-  showPreview: false,
+  showPreview: true,
   theme: 'system',
   language: 'en',
   penColor: '#e11d48',
@@ -114,7 +156,7 @@ export const DEFAULT_SETTINGS: Settings = {
   enablePageSwipe: true,
   enablePauseFist: true,
   enableErase: true,
-  gestureMode: 'air',
+  gestureMode: 'touch',
   zoomSensitivity: 1,
 };
 

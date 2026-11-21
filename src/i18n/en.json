@@ -108,7 +108,14 @@
     "exZoom": "Raise two fingers, then spread or close them.",
     "exLongPress": "Hold a still pinch for one second.",
     "doneTouch": "Great! That is the phone vocabulary, with your hand as the finger. Here is your cheat sheet.",
-    "practiceTouchHint": "Practice with the mouse here: click and drag to draw, and the pinch, two-finger and long-press steps complete as you go."
+    "practiceTouchHint": "Practice with the mouse here: click and drag to draw, and the pinch, two-finger and long-press steps complete as you go.",
+    "paceLabel": "Tutorial pace",
+    "paceGuided": "Guided",
+    "paceNormal": "Normal",
+    "paceQuick": "Quick",
+    "cameraOffPrompt": "Turn on your camera to see your face, framing guide, and live hand skeleton here.",
+    "faceGuideCaption": "Center your face in the oval and raise your hand into view",
+    "faceAndHandReady": "Face & hand detected — gesture: {{gesture}}"
   },
   "settings": {
     "title": "Settings",
