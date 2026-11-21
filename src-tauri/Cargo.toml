@@ -1,6 +1,6 @@
 [package]
 name = "lightpen"
-version = "0.1.6"
+version = "0.1.7"
 description = "Write on PDFs in the air"
 authors = ["ElectroMutex"]
 edition = "2021"
