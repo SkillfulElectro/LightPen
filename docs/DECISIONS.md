@@ -317,7 +317,9 @@ exists.
 
 **Decision.** `src-tauri/src/lib.rs` registers
 `Builder::on_permission_request` (Tauri ≥ 2.12, pinned as the floor in
-`Cargo.toml` for both `tauri` and `tauri-build`) with a pure, unit-tested
+`Cargo.toml` for the `tauri` crate only — `tauri-build` versions
+independently at 2.7.x and has no 2.12; requiring `^2.12` from it broke
+every platform build at dependency resolution) with a pure, unit-tested
 decision function: `PermissionKind::Camera → Allow`, everything else →
 `Default` (the webview's deny-by-default).
 
