@@ -134,4 +134,72 @@ describe('TouchGestureClassifier', () => {
     expect(f.action).toBe('none');
     expect(c.isContact).toBe(false);
   });
+  it('detects pinch and tap even when the index finger bends at the PIP joint to meet the thumb', () => {
+    const c = new TouchGestureClassifier(CFG);
+    // Realistic human pinch: index PIP is higher than index tip (so indexExt is false),
+    // yet index tip is clearly past the index MCP and touching the thumb tip.
+    const bentPinch = makeSyntheticHand({
+      index: 'extended',
+      middle: 'curled',
+      ring: 'curled',
+      pinky: 'curled',
+    });
+    const pip = bentPinch[6]!;
+    bentPinch[8] = { x: pip.x + 0.005, y: pip.y + 0.006, z: 0 };
+    bentPinch[4] = { x: bentPinch[8]!.x + 0.004, y: bentPinch[8]!.y + 0.004, z: 0 };
+
+    const down = c.classify(bentPinch, 0);
+    expect(down.contact).toBe(true);
+    expect(down.action).toBe('point');
+
+    const open = makeSyntheticHand({
+      index: 'extended',
+      middle: 'curled',
+      ring: 'curled',
+      pinky: 'curled',
+      thumb: 'extended',
+    });
+    const up = c.classify(open, 180);
+    expect(up.contact).toBe(false);
+    expect(up.tap).toBe(true);
+  });
+
+  it('accumulates smooth multi-frame two-finger spread at 30 FPS to trigger zoom', () => {
+    const c = new TouchGestureClassifier(CFG);
+    let zoomed = false;
+    // Small 4% spread increments per frame (each below single-frame zoomStep = 10%)
+    // must still accumulate against the zoom anchor and fire zoom.
+    for (let i = 0; i < 8; i++) {
+      const f = c.classify(twoFingers(0.5, 0.5, i * 0.004), i * 33);
+      if (f.zoomFactor > 1 && f.action === 'zoom') zoomed = true;
+    }
+    expect(zoomed).toBe(true);
+  });
+
+  it('reports grab for a closed fist and supports two-finger zoom-out and upward scroll', () => {
+    const c = new TouchGestureClassifier(CFG);
+    const fist = makeSyntheticHand({
+      index: 'curled',
+      middle: 'curled',
+      ring: 'curled',
+      pinky: 'curled',
+      thumb: 'curled',
+    });
+    expect(c.classify(fist, 0).action).toBe('grab');
+
+    // Smooth two-finger pinch-close triggers zoom-out (zoomFactor < 1).
+    let zoomedOut = false;
+    for (let i = 0; i < 8; i++) {
+      const f = c.classify(twoFingers(0.5, 0.5, 0.04 - i * 0.004), 50 + i * 33);
+      if (f.zoomFactor < 1 && f.action === 'zoom') zoomedOut = true;
+    }
+    expect(zoomedOut).toBe(true);
+
+    // Upward two-finger drag triggers scroll-prev.
+    c.reset();
+    c.classify(twoFingers(0.5, 0.65, 0), 400);
+    const up = c.classify(twoFingers(0.5, 0.45, 0), 460);
+    expect(up.pageDelta).toBe(-1);
+    expect(up.action).toBe('scroll');
+  });
 });

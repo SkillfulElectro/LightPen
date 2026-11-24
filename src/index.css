@@ -641,6 +641,7 @@ kbd {
   text-align: center;
 }
 .tutorial-camera-video,
+.tutorial-camera-canvas,
 .tutorial-camera-overlay,
 .calibration-video {
   position: absolute;
@@ -718,4 +719,19 @@ kbd {
 [data-air-hover='true'] {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
+}
+
+.tutorial-hold-bar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 4px;
+  background: rgba(15, 23, 42, 0.55);
+  z-index: 4;
+}
+.tutorial-hold-fill {
+  height: 100%;
+  background: var(--accent);
+  transition: width 60ms linear;
 }

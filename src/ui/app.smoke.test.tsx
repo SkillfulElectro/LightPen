@@ -73,6 +73,24 @@ describe('tutorial reacts to live gestures', () => {
     useStore.getState().noteGesture('pen-down');
     await waitFor(() => expect(screen.getByText(/Nice! Step complete/)).toBeTruthy());
   });
+  it('completes every touch-mode tutorial exercise via live gestures', async () => {
+    const { useStore } = await import('../store/useStore');
+    const { default: App } = await import('../App');
+    useStore.getState().updateSettings({ gestureMode: 'touch' });
+    render(<App />);
+    useStore.setState({ tutorialOpen: true, tutorialStartStep: 0 });
+    const next = () => fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+    await screen.findByRole('dialog', { name: 'Welcome to LightPen' });
+    for (let i = 0; i < 4; i++) next(); // enter write step
+    await screen.findByLabelText('Practice area');
+
+    const sequence = ['pen-down', 'tap', 'scroll-next', 'zoom', 'pause'];
+    for (let i = 0; i < sequence.length; i++) {
+      act(() => useStore.getState().noteGesture(sequence[i]!));
+      await waitFor(() => expect(screen.getByText(/Nice! Step complete/)).toBeTruthy());
+      if (i < sequence.length - 1) next();
+    }
+  });
 });
 
 describe('settings completeness', () => {

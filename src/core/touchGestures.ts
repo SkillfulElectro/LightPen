@@ -1,19 +1,18 @@
 /**
- * Phone-style touch gestures performed in the air with one hand:
- * - Index finger pointing = live cursor hover / pointer move
- * - Thumb + index pinch-drag = air-write / drag (or erase with eraser tool)
- * - Quick thumb + index pinch-release = air tap / click
- * - Two fingers up (index + middle) moving vertically = smooth air scroll / page turn
- * - Two fingers up spreading or pinching = smooth pinch-to-zoom
- * - Open palm (5 fingers extended) = palm erase shortcut
- * - Closed fist or still pinch hold = grab / pause tracking
+ * Smartphone-style air-touch gesture classifier. Pure logic, no DOM.
  *
- * Pure logic, no DOM — unit-tested with synthetic landmarks.
+ * Designed around natural human hand geometry so every gesture works reliably
+ * in front of a real webcam:
+ * - Pinching thumb + index naturally bends the index finger at the PIP joint,
+ *   so contact does not require a rigidly straight index finger (`indexExt`).
+ * - Two-finger zoom accumulates spread relative to a stable anchor instead of
+ *   demanding a large single-frame jump at 30 FPS.
+ * - Tap and long-press still-tolerances accommodate real mid-air hand tremor.
  */
 import type { Landmark } from './types';
 
 export interface TouchGestureConfig {
-  /** Normalized thumb↔index distance below which contact starts. */
+  /** Thumb↔index normalized distance below which the finger touches down. */
   tapThreshold: number;
   /** Release threshold, higher than `tapThreshold` (hysteresis). */
   releaseThreshold: number;
@@ -34,15 +33,16 @@ export interface TouchGestureConfig {
 export const DEFAULT_TOUCH_CONFIG: TouchGestureConfig = {
   tapThreshold: 0.42,
   releaseThreshold: 0.56,
-  tapMaxMs: 380,
-  stillTolerance: 0.045,
+  tapMaxMs: 480,
+  stillTolerance: 0.075,
   zoomStep: 0.1,
-  scrollStep: 0.16,
+  scrollStep: 0.11,
   longPressMs: 950,
   zoomSensitivity: 1,
 };
 
-export type TouchAction = 'none' | 'hover' | 'point' | 'scroll' | 'zoom' | 'erase' | 'grab' | 'pause';
+export type TouchAction =
+  'none' | 'hover' | 'point' | 'scroll' | 'zoom' | 'erase' | 'grab' | 'pause';
 
 export interface TouchFrame {
   /** What the page should do this frame. */
@@ -119,7 +119,7 @@ export class TouchGestureClassifier {
   private startPoint = { x: 0, y: 0 };
   private maxMoved = 0;
   private longPressFired = false;
-  private lastSpread: number | null = null;
+  private zoomAnchor: number | null = null;
   private scrollAnchor: number | null = null;
   private lastScrollY: number | null = null;
 
@@ -131,7 +131,7 @@ export class TouchGestureClassifier {
     this.startPoint = { x: 0, y: 0 };
     this.maxMoved = 0;
     this.longPressFired = false;
-    this.lastSpread = null;
+    this.zoomAnchor = null;
     this.scrollAnchor = null;
     this.lastScrollY = null;
   }
@@ -169,22 +169,31 @@ export class TouchGestureClassifier {
     const middleExt = extended(MIDDLE_TIP, MIDDLE_PIP);
     const ringExt = extended(RING_TIP, RING_PIP);
     const pinkyExt = extended(PINKY_TIP, PINKY_PIP);
-    const thumbExt = dist(thumbTip, wrist) > dist(landmarks[2] ?? wrist, wrist) * 1.02;
+
+    const indexTipDist = dist(indexTip, wrist);
+    const indexMcpDist = dist(indexMcp, wrist);
+    // A real pinched index finger bends at the PIP joint to meet the thumb, so
+    // `indexExt` often flips false even though the fingertip is still out past
+    // the knuckle (unlike a tucked fist or curled-down lifted finger).
+    const indexPinchable = indexExt || indexTipDist > indexMcpDist * 0.92;
+    // Slightly foreshortened pointing (angled toward the camera) still counts as hover.
+    const indexPointing = indexExt || indexTipDist > indexMcpDist * 1.08;
 
     const pinching =
       pinchDistance < (this.contact ? this.config.releaseThreshold : this.config.tapThreshold);
 
-    const openPalm = indexExt && middleExt && ringExt && pinkyExt && thumbExt && !pinching;
+    const openPalm = indexExt && middleExt && ringExt && pinkyExt && !pinching;
+    const twoFingerPose = indexExt && middleExt && !ringExt && !pinkyExt && !pinching;
     const fist = !indexExt && !middleExt && !ringExt && !pinkyExt && !pinching;
 
     // Two fingers up (V-sign / scroll & zoom): index + middle extended, ring & pinky curled.
-    if (!this.contact && indexExt && middleExt && !ringExt && !pinkyExt && !pinching) {
+    if (twoFingerPose) {
       return this.twoFinger(landmarks, point, palmCenter, pinchDistance, handSize);
     }
 
-    // Open palm erase in air-touch mode (all 5 fingers open, clearly not pinching).
+    // Open palm erase in air-touch mode (all 4 fingers open, clearly not pinching).
     if (!this.contact && openPalm) {
-      this.lastSpread = null;
+      this.zoomAnchor = null;
       this.scrollAnchor = null;
       this.lastScrollY = null;
       return {
@@ -199,7 +208,7 @@ export class TouchGestureClassifier {
 
     // Closed fist (grab / rest cursor without writing).
     if (!this.contact && fist) {
-      this.lastSpread = null;
+      this.zoomAnchor = null;
       this.scrollAnchor = null;
       this.lastScrollY = null;
       return {
@@ -213,18 +222,18 @@ export class TouchGestureClassifier {
     }
 
     // ---- one finger (hover, pinch-write, tap, long-press) ----
-    this.lastSpread = null;
+    this.zoomAnchor = null;
     this.scrollAnchor = null;
     this.lastScrollY = null;
     let tap = false;
 
-    if (!this.contact && indexExt && pinching) {
+    if (!this.contact && indexPinchable && pinching) {
       this.contact = true;
       this.contactSince = nowMs;
       this.startPoint = { ...point };
       this.maxMoved = 0;
       this.longPressFired = false;
-    } else if (this.contact && (!indexExt || pinchDistance > this.config.releaseThreshold)) {
+    } else if (this.contact && (!indexPinchable || pinchDistance > this.config.releaseThreshold)) {
       tap =
         nowMs - this.contactSince <= this.config.tapMaxMs &&
         this.maxMoved < this.config.stillTolerance;
@@ -238,7 +247,7 @@ export class TouchGestureClassifier {
     if (!this.contact) {
       return {
         ...IDLE,
-        action: indexExt ? 'hover' : 'none',
+        action: indexPointing ? 'hover' : 'none',
         point,
         palmCenter,
         tap,
@@ -292,14 +301,16 @@ export class TouchGestureClassifier {
 
     let zoomFactor = 1;
     let zoomDirection: 'in' | 'out' | null = null;
-    if (this.lastSpread !== null) {
-      const ratio = spread / this.lastSpread;
+    if (this.zoomAnchor === null) {
+      this.zoomAnchor = spread;
+    } else {
+      const ratio = spread / this.zoomAnchor;
       if (Math.abs(ratio - 1) > this.config.zoomStep) {
         zoomFactor = 1 + (ratio - 1) * this.config.zoomSensitivity;
         zoomDirection = zoomFactor > 1 ? 'in' : 'out';
+        this.zoomAnchor = spread;
       }
     }
-    this.lastSpread = spread;
 
     let pageDelta = 0;
     let scrollDeltaY = 0;
@@ -313,14 +324,15 @@ export class TouchGestureClassifier {
       if (Math.abs(travel) > this.config.scrollStep) {
         pageDelta = travel > 0 ? 1 : -1;
         this.scrollAnchor = point.y;
+        // Re-anchor zoom after a clear vertical scroll so perspective changes don't misfire zoom.
+        this.zoomAnchor = spread;
       }
     } else {
       this.scrollAnchor = point.y;
       this.lastScrollY = point.y;
     }
 
-    const action: TouchAction =
-      zoomFactor !== 1 ? 'zoom' : pageDelta !== 0 || Math.abs(scrollDeltaY) > 0.004 ? 'scroll' : 'scroll';
+    const action: TouchAction = zoomFactor !== 1 ? 'zoom' : 'scroll';
 
     return {
       action,

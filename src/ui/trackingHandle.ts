@@ -1,7 +1,10 @@
 /**
- * Module-level handle to the camera tracking session and live camera feed.
- * Shares the active MediaStream and real-time hand landmarks with the Tutorial
- * so the user sees their face, posture, and hand skeleton while learning.
+ * Module-level handle to the camera tracking session, live `<video>` element,
+ * tracker lifecycle status, and real-time hand landmarks.
+ *
+ * Sharing the single `<video>` element (drawn onto canvases in the Tutorial and
+ * Calibration views) avoids attaching the same `MediaStream` to multiple
+ * `<video>` elements, which can starve decoding on WebKitGTK / GStreamer.
  */
 import type { GestureKind, Landmark } from '../core/types';
 
@@ -13,14 +16,34 @@ export interface LiveCameraFrame {
   handPresent: boolean;
   indexTip: { x: number; y: number } | null;
   contact: boolean;
+  holdProgress: number;
 }
+
+export type TrackerPhase = 'idle' | 'starting' | 'loading-model' | 'running' | 'error';
+
+export interface TrackerStatus {
+  phase: TrackerPhase;
+  error: string | null;
+  detail: string | null;
+  fps: number;
+}
+
+const DEFAULT_STATUS: TrackerStatus = {
+  phase: 'idle',
+  error: null,
+  detail: null,
+  fps: 0,
+};
 
 let startTrackingRef: (() => Promise<void>) | null = null;
 let activeStream: MediaStream | null = null;
+let activeVideo: HTMLVideoElement | null = null;
 let latestFrame: LiveCameraFrame | null = null;
+let trackerStatus: TrackerStatus = { ...DEFAULT_STATUS };
 
 const streamListeners = new Set<(stream: MediaStream | null) => void>();
 const frameListeners = new Set<(frame: LiveCameraFrame) => void>();
+const statusListeners = new Set<(status: TrackerStatus) => void>();
 
 export function registerTrackingStarter(start: () => Promise<void>): () => void {
   startTrackingRef = start;
@@ -52,6 +75,31 @@ export function subscribeCameraStream(listener: (stream: MediaStream | null) => 
   listener(activeStream);
   return () => {
     streamListeners.delete(listener);
+  };
+}
+
+export function publishCameraVideo(video: HTMLVideoElement | null): void {
+  activeVideo = video;
+}
+
+export function getCameraVideo(): HTMLVideoElement | null {
+  return activeVideo;
+}
+
+export function publishTrackerStatus(patch: Partial<TrackerStatus>): void {
+  trackerStatus = { ...trackerStatus, ...patch };
+  for (const listener of statusListeners) listener(trackerStatus);
+}
+
+export function getTrackerStatus(): TrackerStatus {
+  return trackerStatus;
+}
+
+export function subscribeTrackerStatus(listener: (status: TrackerStatus) => void): () => void {
+  statusListeners.add(listener);
+  listener(trackerStatus);
+  return () => {
+    statusListeners.delete(listener);
   };
 }
 

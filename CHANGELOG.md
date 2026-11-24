@@ -7,6 +7,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.8] - 2026-11-24
+
+### Fixed
+
+- **Hand-tracking reliability on real webcams.** Gesture detection now
+  matches natural human hand geometry: pinching thumb + index no longer
+  requires a rigidly straight index finger (a real pinch bends the index at
+  the PIP joint), open-palm detection no longer depends on thumb extension,
+  and hover tolerates slightly foreshortened pointing. Open-palm page
+  swipes are detected by scanning a 450 ms window instead of comparing
+  against the oldest history sample, so swiping after holding the hand
+  still works. Two-finger zoom accumulates spread against a stable anchor
+  instead of demanding a large single-frame jump at 30 FPS, and tap /
+  long-press tolerances accommodate mid-air hand tremor.
+- **Silent WebGL video-texture failures (Linux/WebKitGTK, Android
+  WebViews).** `detectForVideo` on a `<video>` element can silently upload
+  black frames without throwing; the detector now probes 2D-canvas and
+  ImageData readback automatically, starts on CPU + canvas readback on
+  Linux WebKitGTK, and falls back from GPU to CPU after sustained empty
+  frames. The bundled model is pre-fetched and validated once (rejecting
+  HTML fallbacks), and a rejected initialization promise is never cached,
+  so retrying the camera works cleanly.
+- **Dominant-hand selection.** MediaPipe handedness is now interpreted with
+  selfie-mirror awareness, and selection falls back to the largest visible
+  hand instead of dropping tracking when the other hand is raised.
+- **Tutorial camera stage.** The tutorial and calibration views now draw
+  from CameraPreview's single `<video>` element onto a canvas instead of
+  attaching the same stream to a second `<video>`, avoiding decoder
+  starvation and keeping the hand skeleton pixel-aligned. Air gestures no
+  longer trigger page turns, zoom, or taps on tutorial controls while
+  practicing, stale gestures from a previous step are ignored, and the
+  fist-hold pause shows a progress bar.
+
+### Added
+
+- `GestureResult.holdProgress` (0..1) for fist-hold pause feedback, and a
+  tracker status channel (`starting` / `loading-model` / `running` /
+  `error` with FPS) so the tutorial can show camera and model loading
+  states and retry cleanly.
+
 ### Fixed
 
 - **Camera opened but tracking stayed at 0 FPS and never saw a hand (0.1.5,
@@ -112,5 +152,6 @@ First working version.
 - **Privacy** — on-device processing only, camera stops on pause/hide, visible
   live indicator, no telemetry, strict CSP, least-privilege Tauri capabilities.
 
-[Unreleased]: https://github.com/SkillfulElectro/LightPen/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/SkillfulElectro/LightPen/compare/v0.1.8...HEAD
+[0.1.8]: https://github.com/SkillfulElectro/LightPen/releases/tag/v0.1.8
 [0.1.0]: https://github.com/SkillfulElectro/LightPen/releases/tag/v0.1.0

@@ -3,7 +3,8 @@
  * - Live face & hand video with 21-point hand-skeleton overlay.
  * - Real-time air touch simulation & dynamic mouse cursor styling.
  * - Live store reads inside frame loop (no stale closures on tool/color/mode changes).
- * - Runtime GPU -> CPU automatic fallback so detection works reliably on every device.
+ * - Runtime GPU -> CPU automatic fallback for both thrown errors and silent
+ *   zero-detection streams so detection works reliably on every device.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -48,11 +49,15 @@ import {
   fallbackToCpuLandmarker,
   getActiveDelegate,
   getHandLandmarker,
+  hasDetectedHand,
+  resetDetectionSession,
 } from '../platform/mediapipe';
 import { useStore } from '../store/useStore';
 import {
   publishCameraStream,
+  publishCameraVideo,
   publishLiveFrame,
+  publishTrackerStatus,
   registerTrackingStarter,
 } from './trackingHandle';
 
@@ -67,6 +72,7 @@ export default function CameraPreview({ pageSize, onGesture }: Props) {
   const overlayRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const stopLoopRef = useRef<(() => void) | null>(null);
+  const startingRef = useRef(false);
   const pageSizeRef = useRef<PageSize>(pageSize);
   pageSizeRef.current = pageSize;
 
@@ -92,50 +98,70 @@ export default function CameraPreview({ pageSize, onGesture }: Props) {
     void refreshCameras();
   }, [refreshCameras]);
 
-  const stop = useCallback(() => {
-    setFailure(null);
-    setFailureDetail(null);
-    stopLoopRef.current?.();
-    stopLoopRef.current = null;
-    stopCamera(streamRef.current);
-    streamRef.current = null;
-    publishCameraStream(null);
-    publishLiveFrame({
-      landmarks: null,
-      mirrored: useStore.getState().settings.mirrored,
-      gestureKind: 'none',
-      pinchDistance: 1,
-      handPresent: false,
-      indexTip: null,
-      contact: false,
-    });
-    useStore.setState({ handCursor: null, airCursor: null, activeStroke: null });
-    setTracking({ active: false, fps: 0, handPresent: false, hint: null });
-  }, [setTracking]);
+  const stop = useCallback(
+    (preserveErrorStatus = false) => {
+      setFailure(null);
+      setFailureDetail(null);
+      stopLoopRef.current?.();
+      stopLoopRef.current = null;
+      stopCamera(streamRef.current);
+      streamRef.current = null;
+      if (videoRef.current) {
+        videoRef.current.srcObject = null;
+      }
+      publishCameraStream(null);
+      publishCameraVideo(null);
+      if (!preserveErrorStatus) {
+        publishTrackerStatus({ phase: 'idle', error: null, detail: null, fps: 0 });
+      }
+      publishLiveFrame({
+        landmarks: null,
+        mirrored: useStore.getState().settings.mirrored,
+        gestureKind: 'none',
+        pinchDistance: 1,
+        handPresent: false,
+        indexTip: null,
+        contact: false,
+        holdProgress: 0,
+      });
+      useStore.setState({ handCursor: null, airCursor: null, activeStroke: null });
+      setTracking({ active: false, fps: 0, handPresent: false, hint: null });
+    },
+    [setTracking],
+  );
 
   const start = useCallback(async () => {
+    if (startingRef.current || streamRef.current) return;
+    startingRef.current = true;
     setError(null);
     setModelMissing(false);
     setFailure(null);
     setFailureDetail(null);
+    publishTrackerStatus({ phase: 'starting', error: null, detail: null, fps: 0 });
+    resetDetectionSession();
     try {
       const initialSettings = useStore.getState().settings;
       const stream = await startCamera(initialSettings.cameraId);
       streamRef.current = stream;
-      publishCameraStream(stream);
       const video = videoRef.current;
       if (!video) throw new CameraError('unknown', 'Video element missing.');
       video.srcObject = stream;
+      publishCameraVideo(video);
+      publishCameraStream(stream);
       await video.play();
       await waitForVideoFrames(video, 4000);
       await refreshCameras();
 
+      publishTrackerStatus({ phase: 'loading-model', error: null, detail: null });
       let landmarker: Awaited<ReturnType<typeof getHandLandmarker>>;
       try {
         landmarker = await getHandLandmarker();
-      } catch {
+      } catch (err) {
+        const msg = t('camera.modelMissing');
+        const detail = err instanceof Error ? err.message : String(err);
         setModelMissing(true);
-        stop();
+        publishTrackerStatus({ phase: 'error', error: msg, detail, fps: 0 });
+        stop(true);
         return;
       }
 
@@ -165,6 +191,8 @@ export default function CameraPreview({ pageSize, onGesture }: Props) {
       let tapPulseSeq = 0;
       let activeStroke: Stroke | null = null;
       let switchingToCpu = false;
+      let triedSilentCpuFallback = false;
+      let scrollAccum = 0;
 
       const lightCanvas = document.createElement('canvas');
       lightCanvas.width = 64;
@@ -191,6 +219,22 @@ export default function CameraPreview({ pageSize, onGesture }: Props) {
       const healthGraceMs = 2500;
       const loopStartedAt = performance.now();
 
+      const triggerCpuFallback = () => {
+        if (getActiveDelegate() !== 'GPU' || switchingToCpu) return;
+        switchingToCpu = true;
+        void fallbackToCpuLandmarker()
+          .then((cpuLm) => {
+            landmarker = cpuLm;
+            consecutiveErrors = 0;
+          })
+          .catch(() => {
+            // Keep existing landmarker if CPU init fails; health check will report it.
+          })
+          .finally(() => {
+            switchingToCpu = false;
+          });
+      };
+
       const reportHealth = () => {
         if (performance.now() - loopStartedAt < healthGraceMs) return;
         const sample = {
@@ -206,7 +250,17 @@ export default function CameraPreview({ pageSize, onGesture }: Props) {
         if (next === reportedFailure) return;
         reportedFailure = next;
         setFailure(next);
-        setFailureDetail(diagnosis ? diagnosticText(diagnosis, navigator.userAgent) : null);
+        const detail = diagnosis ? diagnosticText(diagnosis, navigator.userAgent) : null;
+        setFailureDetail(detail);
+        if (next) {
+          publishTrackerStatus({
+            phase: next === 'no-hand' ? 'running' : 'error',
+            error: t(TRACKER_FAILURE_MESSAGE_KEY[next]),
+            detail,
+          });
+        } else {
+          publishTrackerStatus({ phase: 'running', error: null, detail: null });
+        }
       };
 
       const stopLoop = runFrameLoop(
@@ -251,24 +305,20 @@ export default function CameraPreview({ pageSize, onGesture }: Props) {
 
           let result;
           try {
-            result = detectHand(landmarker, video, nowMs, liveSettings.dominantHand);
+            result = detectHand(
+              landmarker,
+              video,
+              nowMs,
+              liveSettings.dominantHand,
+              liveSettings.mirrored,
+            );
             consecutiveErrors = 0;
           } catch {
             detectorErrors += 1;
             consecutiveErrors += 1;
             drawOverlay(video, null, liveSettings.mirrored);
             // Automatic GPU -> CPU recovery if GPU WebGL delegate fails at runtime.
-            if (consecutiveErrors === 3 && getActiveDelegate() === 'GPU' && !switchingToCpu) {
-              switchingToCpu = true;
-              void fallbackToCpuLandmarker()
-                .then((cpuLm) => {
-                  landmarker = cpuLm;
-                  consecutiveErrors = 0;
-                })
-                .finally(() => {
-                  switchingToCpu = false;
-                });
-            }
+            if (consecutiveErrors === 3) triggerCpuFallback();
             if (consecutiveErrors === 15) reportHealth();
             return;
           }
@@ -277,6 +327,20 @@ export default function CameraPreview({ pageSize, onGesture }: Props) {
 
           if (!result) {
             lostFrames += 1;
+            scrollAccum = 0;
+            // Silent GPU WebGL driver failure: GPU delegate initialized and runs
+            // without throwing, yet never detects a hand. Switch to CPU once after
+            // ~1.5 s of empty frames so broken GPU stacks recover automatically.
+            if (
+              !triedSilentCpuFallback &&
+              !hasDetectedHand() &&
+              lostFrames >= 45 &&
+              video.videoWidth > 0 &&
+              getActiveDelegate() === 'GPU'
+            ) {
+              triedSilentCpuFallback = true;
+              triggerCpuFallback();
+            }
             setTracking({ handPresent: false, hint: lostFrames > 30 ? 'out-of-frame' : null });
             if (lostFrames > 8) finishStroke();
             airBridge.clearHover();
@@ -289,6 +353,7 @@ export default function CameraPreview({ pageSize, onGesture }: Props) {
               handPresent: false,
               indexTip: null,
               contact: false,
+              holdProgress: 0,
             });
             return;
           }
@@ -329,7 +394,10 @@ export default function CameraPreview({ pageSize, onGesture }: Props) {
             const { interactive } = airBridge.move(vp.x, vp.y);
             if (didTap) {
               tapPulseSeq += 1;
-              airBridge.tap(vp.x, vp.y);
+              // Avoid accidentally clicking "Skip tutorial" / Close while practicing air-tap.
+              if (!tutorialOpen) {
+                airBridge.tap(vp.x, vp.y);
+              }
             }
             const desc = resolveAirCursorStyle(gestureKind, liveTool, interactive !== null);
             useStore.setState({
@@ -342,7 +410,8 @@ export default function CameraPreview({ pageSize, onGesture }: Props) {
                 cssCursor: desc.cssCursor,
                 label: desc.label,
                 color: liveSettings.penColor,
-                active: gestureKind === 'pen-down' || gestureKind === 'erase' || gestureKind === 'tap',
+                active:
+                  gestureKind === 'pen-down' || gestureKind === 'erase' || gestureKind === 'tap',
                 holdProgress,
                 tapPulseSeq,
                 overInteractive: interactive !== null,
@@ -366,29 +435,43 @@ export default function CameraPreview({ pageSize, onGesture }: Props) {
             if (frame.twoFingers) {
               finishStroke();
               if (frame.zoomFactor !== 1) {
+                scrollAccum = 0;
                 gestureKind = frame.zoomDirection === 'out' ? 'zoom-out' : 'zoom-in';
-                useStore.getState().setZoom(useStore.getState().zoom * frame.zoomFactor);
+                if (!tutorialOpen) {
+                  useStore.getState().setZoom(useStore.getState().zoom * frame.zoomFactor);
+                }
                 onGesture?.('zoom');
               } else {
                 gestureKind = 'scroll';
                 if (Math.abs(frame.scrollDeltaY) > 0.003) {
-                  const vp = normalizedToViewport(
-                    smoothed,
-                    liveSettings.calibration,
-                    liveSettings.mirrored,
-                    window.innerWidth,
-                    window.innerHeight,
-                  );
-                  airBridge.scroll(vp.x, vp.y, frame.scrollDeltaY);
+                  scrollAccum += frame.scrollDeltaY;
+                  if (!tutorialOpen) {
+                    const vp = normalizedToViewport(
+                      smoothed,
+                      liveSettings.calibration,
+                      liveSettings.mirrored,
+                      window.innerWidth,
+                      window.innerHeight,
+                    );
+                    airBridge.scroll(vp.x, vp.y, frame.scrollDeltaY);
+                  }
+                  if (Math.abs(scrollAccum) >= 0.055) {
+                    onGesture?.(scrollAccum > 0 ? 'scroll-next' : 'scroll-prev');
+                    scrollAccum = 0;
+                  }
                 }
                 if (frame.pageDelta !== 0) {
-                  useStore.getState().setCurrentPage(page + frame.pageDelta);
+                  if (!tutorialOpen) {
+                    useStore.getState().setCurrentPage(page + frame.pageDelta);
+                  }
                   onGesture?.(frame.pageDelta > 0 ? 'scroll-next' : 'scroll-prev');
+                  scrollAccum = 0;
                 }
               }
               useStore.setState({ handCursor: { x: where.x, y: where.y, kind: gestureKind } });
               updateAirCursor(smoothed, gestureKind, 0, false);
             } else if (frame.action === 'erase') {
+              scrollAccum = 0;
               finishStroke();
               gestureKind = 'erase';
               if (!tutorialOpen) {
@@ -407,11 +490,13 @@ export default function CameraPreview({ pageSize, onGesture }: Props) {
               onGesture?.('erase');
               updateAirCursor(frame.palmCenter, 'erase', 0, false);
             } else if (frame.action === 'grab') {
+              scrollAccum = 0;
               finishStroke();
               gestureKind = 'fist';
               useStore.setState({ handCursor: { x: where.x, y: where.y, kind: 'fist' } });
               updateAirCursor(frame.palmCenter, 'fist', 0, false);
             } else if (frame.contact) {
+              scrollAccum = 0;
               const erasing = liveTool === 'eraser';
               gestureKind = erasing ? 'erase' : 'pen-down';
               if (!tutorialOpen) {
@@ -438,14 +523,17 @@ export default function CameraPreview({ pageSize, onGesture }: Props) {
               updateAirCursor(smoothed, gestureKind, frame.holdProgress, false);
               if (frame.action === 'pause') {
                 onGesture?.('pause');
-                stop();
-                return;
+                if (!tutorialOpen) {
+                  stop();
+                  return;
+                }
               }
             } else {
+              scrollAccum = 0;
               finishStroke();
-              gestureKind = frame.tap ? 'tap' : 'hover';
+              gestureKind = frame.tap ? 'tap' : frame.action === 'hover' ? 'hover' : 'none';
               if (frame.tap) onGesture?.('tap');
-              else onGesture?.('hover');
+              else if (gestureKind === 'hover') onGesture?.('hover');
               useStore.setState({ handCursor: { x: where.x, y: where.y, kind: gestureKind } });
               updateAirCursor(smoothed, gestureKind, 0, frame.tap);
             }
@@ -458,11 +546,13 @@ export default function CameraPreview({ pageSize, onGesture }: Props) {
               handPresent: true,
               indexTip: smoothed,
               contact: frame.contact,
+              holdProgress: frame.holdProgress,
             });
             return;
           }
 
           // ---- Air gesture mode ----
+          scrollAccum = 0;
           const g = classifier.classify(result.landmarks, nowMs);
           setTracking({ hint: trackingHint(g.handSize) ?? (lowLight ? 'low-light' : null) });
           onGesture?.(g.kind);
@@ -505,14 +595,18 @@ export default function CameraPreview({ pageSize, onGesture }: Props) {
           }
 
           if (g.swipe) {
-            const s = useStore.getState();
-            s.setCurrentPage(s.currentPage + (g.swipe === 'next' ? 1 : -1));
+            if (!tutorialOpen) {
+              const s = useStore.getState();
+              s.setCurrentPage(s.currentPage + (g.swipe === 'next' ? 1 : -1));
+            }
             onGesture?.(`swipe-${g.swipe}`);
           }
           if (g.pauseTriggered) {
             onGesture?.('pause');
-            stop();
-            return;
+            if (!tutorialOpen) {
+              stop();
+              return;
+            }
           }
 
           const cursorNorm = g.kind === 'erase' ? g.palmCenter : smoothed;
@@ -523,7 +617,7 @@ export default function CameraPreview({ pageSize, onGesture }: Props) {
               kind: g.kind,
             },
           });
-          updateAirCursor(cursorNorm, g.kind, 0, false);
+          updateAirCursor(cursorNorm, g.kind, g.holdProgress, false);
 
           publishLiveFrame({
             landmarks: result.landmarks,
@@ -533,11 +627,14 @@ export default function CameraPreview({ pageSize, onGesture }: Props) {
             handPresent: true,
             indexTip: smoothed,
             contact: g.kind === 'pen-down',
+            holdProgress: g.holdProgress,
           });
         },
         (measuredFps) => {
           fps = measuredFps;
-          setTracking({ fps: Math.round(measuredFps) });
+          const rounded = Math.round(measuredFps);
+          setTracking({ fps: rounded });
+          publishTrackerStatus({ fps: rounded });
           adaptiveSkip = measuredFps < 18 ? 2 : 1;
           reportHealth();
         },
@@ -547,10 +644,22 @@ export default function CameraPreview({ pageSize, onGesture }: Props) {
         stopLoop();
       };
       setTracking({ active: true });
+      publishTrackerStatus({ phase: 'running', error: null, detail: null });
     } catch (err) {
-      if (err instanceof CameraError) setError(t(CAMERA_ERROR_MESSAGE_KEY[err.kind]));
-      else setError(t('camera.unsupported'));
-      stop();
+      const msg =
+        err instanceof CameraError
+          ? t(CAMERA_ERROR_MESSAGE_KEY[err.kind])
+          : t('camera.unsupported');
+      setError(msg);
+      publishTrackerStatus({
+        phase: 'error',
+        error: msg,
+        detail: err instanceof Error ? err.message : null,
+        fps: 0,
+      });
+      stop(true);
+    } finally {
+      startingRef.current = false;
     }
   }, [refreshCameras, stop, setTracking, onGesture, t]);
 
@@ -591,11 +700,26 @@ export default function CameraPreview({ pageSize, onGesture }: Props) {
     const px = (x: number) => (mirrored ? 1 - x : x) * w;
     const py = (y: number) => y * h;
     const connections: [number, number][] = [
-      [0, 1], [1, 2], [2, 3], [3, 4],
-      [0, 5], [5, 6], [6, 7], [7, 8],
-      [5, 9], [9, 10], [10, 11], [11, 12],
-      [9, 13], [13, 14], [14, 15], [15, 16],
-      [13, 17], [17, 18], [18, 19], [19, 20],
+      [0, 1],
+      [1, 2],
+      [2, 3],
+      [3, 4],
+      [0, 5],
+      [5, 6],
+      [6, 7],
+      [7, 8],
+      [5, 9],
+      [9, 10],
+      [10, 11],
+      [11, 12],
+      [9, 13],
+      [13, 14],
+      [14, 15],
+      [15, 16],
+      [13, 17],
+      [17, 18],
+      [18, 19],
+      [19, 20],
       [0, 17],
     ];
     ctx.strokeStyle = '#22c55e';
