@@ -122,4 +122,42 @@ describe('GestureClassifier', () => {
     c.reset();
     expect(c.isPenDown).toBe(false);
   });
+  it('detects a horizontal open-palm swipe even after holding the hand still for over a second', () => {
+    const c = new GestureClassifier(CFG);
+    const at = (x: number) => unPinched({ palm: { x, y: 0.5 } });
+    // Hold hand still at 30 FPS for 1.2 s so palmHistory is full.
+    for (let t = 0; t <= 1200; t += 33) {
+      expect(c.classify(at(0.75), t).swipe).toBeNull();
+    }
+    // Now swipe left across ~160 ms.
+    let swipe: 'next' | 'prev' | null = null;
+    const xs = [0.7, 0.64, 0.58, 0.52, 0.46];
+    xs.forEach((x, idx) => {
+      const r = c.classify(at(x), 1233 + idx * 33);
+      if (r.swipe) swipe = r.swipe;
+    });
+    expect(swipe).toBe('next');
+  });
+
+  it('detects a rightward swipe as prev and reports fist holdProgress', () => {
+    const c = new GestureClassifier(CFG);
+    const at = (x: number) => unPinched({ palm: { x, y: 0.5 } });
+    c.classify(at(0.25), 0);
+    c.classify(at(0.38), 60);
+    const r = c.classify(at(0.52), 120);
+    expect(r.swipe).toBe('prev');
+
+    const fist = makeSyntheticHand({
+      index: 'curled',
+      middle: 'curled',
+      ring: 'curled',
+      pinky: 'curled',
+      thumb: 'curled',
+    });
+    expect(c.classify(fist, 200).holdProgress).toBe(0);
+    expect(c.classify(fist, 700).holdProgress).toBeCloseTo(0.5, 1);
+    const done = c.classify(fist, 1250);
+    expect(done.holdProgress).toBe(1);
+    expect(done.pauseTriggered).toBe(true);
+  });
 });

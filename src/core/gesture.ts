@@ -1,16 +1,17 @@
 /**
- * Gesture classifier over the 21 MediaPipe hand landmarks.
- * Pure logic, no DOM — fully unit-testable with synthetic landmarks.
+ * Hand-gesture classifier for LightPen air-writing. Pure logic, no DOM.
  *
- * Landmark indices (MediaPipe Hands):
- *   0 wrist, 4 thumb tip, 5 index MCP, 8 index tip, 9 middle MCP,
- *   12 middle tip, 16 ring tip, 20 pinky tip.
+ * Maps 21 MediaPipe hand landmarks to:
+ * - `pen-down` (thumb tip + index tip pinched, with hysteresis)
+ * - `hover`    (index extended, not pinched)
+ * - `erase`    (open palm or two fingers extended)
+ * - `fist`     (all fingers curled; holding ~1 s emits `pauseTriggered`)
+ * - `swipe`    (fast horizontal open-palm motion emits 'next' | 'prev')
  */
-
 import type { GestureKind, Landmark } from './types';
 
 export interface GestureConfig {
-  pinchThreshold: number; // enter pen-down below this (normalized)
+  pinchThreshold: number; // enter pen-down below this normalized pinch distance
   pinchReleaseThreshold: number; // exit pen-down above this (hysteresis)
   enableErase: boolean;
   enablePageSwipe: boolean;
@@ -19,44 +20,41 @@ export interface GestureConfig {
 
 export interface GestureResult {
   kind: GestureKind;
-  /** Index fingertip (landmark 8) in normalized camera coords. */
   indexTip: { x: number; y: number };
-  /** Palm center (wrist↔middle-MCP midpoint) in normalized camera coords. */
   palmCenter: { x: number; y: number };
-  /** Normalized thumb↔index distance (hand-size normalized). */
   pinchDistance: number;
-  /** Hand size estimate (wrist→middle-MCP distance, normalized). */
   handSize: number;
-  /** True when the pinch state changed this frame. */
   pinchChanged: boolean;
-  /** True when a page-swipe was detected this frame. */
   swipe: 'next' | 'prev' | null;
-  /** True when the fist-hold pause gesture completed this frame. */
   pauseTriggered: boolean;
+  /** 0..1 progress while holding a closed fist toward pause. */
+  holdProgress: number;
 }
 
 const WRIST = 0;
 const THUMB_TIP = 4;
+const INDEX_MCP = 5;
 const INDEX_TIP = 8;
 const MIDDLE_MCP = 9;
 
 function dist(a: Landmark, b: Landmark): number {
-  const dx = a.x - b.x;
-  const dy = a.y - b.y;
-  return Math.hypot(dx, dy);
+  return Math.hypot(a.x - b.x, a.y - b.y);
 }
 
 function pinchDist3D(a: Landmark, b: Landmark): number {
-  const dx = a.x - b.x;
-  const dy = a.y - b.y;
   const dz = ((a.z ?? 0) - (b.z ?? 0)) * 0.35;
-  return Math.hypot(dx, dy, dz);
+  return Math.hypot(a.x - b.x, a.y - b.y, dz);
 }
 
-/** Stateful classifier: keeps pinch hysteresis, swipe history and fist timer. */
+interface PalmSample {
+  x: number;
+  y: number;
+  t: number;
+}
+
 export class GestureClassifier {
   private penDown = false;
-  private palmHistory: { x: number; y: number; t: number }[] = [];
+  private palmHistory: PalmSample[] = [];
   private fistSince: number | null = null;
   private lastSwipeAt = Number.NEGATIVE_INFINITY;
   private pauseFired = false;
@@ -92,14 +90,15 @@ export class GestureClassifier {
         pinchChanged: false,
         swipe: null,
         pauseTriggered: false,
+        holdProgress: 0,
       };
     }
     const wrist = landmarks[WRIST] ?? { x: 0, y: 0, z: 0 };
+    const indexMcp = landmarks[INDEX_MCP] ?? wrist;
     const indexTipLm = landmarks[INDEX_TIP] ?? wrist;
     const middleMcp = landmarks[MIDDLE_MCP] ?? wrist;
     const thumbTip = landmarks[THUMB_TIP] ?? wrist;
 
-    const indexMcp = landmarks[5] ?? middleMcp;
     const pinkyMcp = landmarks[17] ?? middleMcp;
     const palmWidth = dist(indexMcp, pinkyMcp);
     const handSize = Math.max(dist(wrist, middleMcp), palmWidth * 0.72, 1e-6);
@@ -130,36 +129,48 @@ export class GestureClassifier {
     const middleExt = extended(12, 10);
     const ringExt = extended(16, 14);
     const pinkyExt = extended(20, 18);
-    const thumbExt = dist(thumbTip, wrist) > dist(landmarks[2] ?? wrist, wrist) * 1.02;
+    const indexPointing = indexExt || dist(indexTipLm, wrist) > dist(indexMcp, wrist) * 1.08;
 
-    const openPalm = indexExt && middleExt && ringExt && pinkyExt && thumbExt;
+    const openPalm = indexExt && middleExt && ringExt && pinkyExt;
     const twoFinger = indexExt && middleExt && !ringExt && !pinkyExt;
     const fist = !indexExt && !middleExt && !ringExt && !pinkyExt;
 
     // --- swipe detection (open palm, horizontal, with cooldown) ---
+    // Scan recent samples within a 450 ms window rather than only comparing
+    // against `palmHistory[0]`: when a user holds their hand still before
+    // swiping, the oldest sample sits at the retention boundary and would
+    // otherwise fail `dt < 350` permanently.
     let swipe: 'next' | 'prev' | null = null;
     this.palmHistory.push({ x: palmCenter.x, y: palmCenter.y, t: nowMs });
-    this.palmHistory = this.palmHistory.filter((p) => nowMs - p.t < 400);
+    this.palmHistory = this.palmHistory.filter((p) => nowMs - p.t <= 500);
     if (this.config.enablePageSwipe && openPalm && nowMs - this.lastSwipeAt > 1500) {
-      const first = this.palmHistory[0];
       const last = this.palmHistory[this.palmHistory.length - 1];
-      if (first && last) {
-        const dx = last.x - first.x;
-        const dy = Math.abs(last.y - first.y);
-        const dt = Math.max(last.t - first.t, 1);
-        if (Math.abs(dx) > 0.22 && dy < Math.abs(dx) * 0.6 && dt < 350) {
-          swipe = dx > 0 ? 'prev' : 'next';
-          this.lastSwipeAt = nowMs;
-          this.palmHistory = [];
+      if (last) {
+        for (let i = this.palmHistory.length - 2; i >= 0; i--) {
+          const prev = this.palmHistory[i]!;
+          const dt = last.t - prev.t;
+          if (dt <= 0) continue;
+          if (dt > 450) break;
+          const dx = last.x - prev.x;
+          const dy = Math.abs(last.y - prev.y);
+          if (Math.abs(dx) > 0.22 && dy < Math.abs(dx) * 0.7) {
+            swipe = dx > 0 ? 'prev' : 'next';
+            this.lastSwipeAt = nowMs;
+            this.palmHistory = [];
+            break;
+          }
         }
       }
     }
 
     // --- fist-hold pause (~1 s) ---
     let pauseTriggered = false;
+    let holdProgress = 0;
     if (this.config.enablePauseFist && fist) {
       if (this.fistSince === null) this.fistSince = nowMs;
-      if (nowMs - this.fistSince >= 1000 && !this.pauseFired) {
+      const heldMs = Math.max(0, nowMs - this.fistSince);
+      holdProgress = Math.min(1, heldMs / 1000);
+      if (heldMs >= 1000 && !this.pauseFired) {
         pauseTriggered = true;
         this.pauseFired = true;
       }
@@ -173,7 +184,7 @@ export class GestureClassifier {
     if (this.penDown) kind = 'pen-down';
     else if (this.config.enableErase && (openPalm || twoFinger)) kind = 'erase';
     else if (fist) kind = 'fist';
-    else if (indexExt) kind = 'hover';
+    else if (indexPointing) kind = 'hover';
 
     return {
       kind,
@@ -184,6 +195,7 @@ export class GestureClassifier {
       pinchChanged,
       swipe,
       pauseTriggered,
+      holdProgress,
     };
   }
 }

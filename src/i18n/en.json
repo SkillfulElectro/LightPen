@@ -115,7 +115,10 @@
     "paceQuick": "Quick",
     "cameraOffPrompt": "Turn on your camera to see your face, framing guide, and live hand skeleton here.",
     "faceGuideCaption": "Center your face in the oval and raise your hand into view",
-    "faceAndHandReady": "Face & hand detected — gesture: {{gesture}}"
+    "faceAndHandReady": "Face & hand detected — gesture: {{gesture}}",
+    "startingCamera": "Starting camera…",
+    "loadingTracker": "Loading hand tracker…",
+    "retryCamera": "Retry camera"
   },
   "settings": {
     "title": "Settings",
