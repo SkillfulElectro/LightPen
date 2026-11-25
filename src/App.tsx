@@ -7,20 +7,34 @@ import { isTauri, restoreWindowSize, saveBytesAs, saveWindowSize } from './platf
 import AirCursorOverlay from './ui/AirCursorOverlay';
 import CameraPreview from './ui/CameraPreview';
 import { CheatSheet, PermissionDialog, SettingsDialog, ShortcutsHelp } from './ui/Dialogs';
+import ErrorBoundary from './ui/ErrorBoundary';
+import { HandIcon } from './ui/Icons';
 import PdfViewer from './ui/PdfViewer';
 import Toolbar from './ui/Toolbar';
 import Tutorial from './ui/Tutorial';
+
+function resolveDark(theme: 'light' | 'dark' | 'system'): boolean {
+  if (theme === 'dark') return true;
+  if (theme === 'light') return false;
+  return (
+    typeof window !== 'undefined' &&
+    typeof window.matchMedia === 'function' &&
+    window.matchMedia('(prefers-color-scheme: dark)').matches
+  );
+}
 
 export default function App() {
   const { t } = useTranslation();
   const [pdfBytes, setPdfBytes] = useState<Uint8Array | null>(null);
   const [pdfName, setPdfName] = useState<string | null>(null);
   const settings = useStore((s) => s.settings);
+  const updateSettings = useStore((s) => s.updateSettings);
   const setPdf = useStore((s) => s.setPdf);
   const setTutorialOpen = useStore((s) => s.setTutorialOpen);
   const setCheatSheetOpen = useStore((s) => s.setCheatSheetOpen);
   const noteGesture = useStore((s) => s.noteGesture);
   const currentPage = useStore((s) => s.currentPage);
+  const [isDark, setIsDark] = useState(() => resolveDark(settings.theme));
 
   // Never lose the last strokes: write a pending sidecar before the page goes
   // away (close, reload, navigation) instead of waiting out the debounce.
@@ -43,19 +57,25 @@ export default function App() {
     return () => window.removeEventListener('resize', onResize);
   }, [setTutorialOpen]);
 
-  // Theme (light/dark/system).
+  // Theme (light/dark/system): sync data-theme, .dark class, and native color-scheme.
   useEffect(() => {
     const apply = () => {
-      const dark =
-        settings.theme === 'dark' ||
-        (settings.theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+      const dark = resolveDark(settings.theme);
+      setIsDark(dark);
       document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+      document.documentElement.classList.toggle('dark', dark);
+      document.documentElement.style.colorScheme = dark ? 'dark' : 'light';
     };
     apply();
     const mq = window.matchMedia('(prefers-color-scheme: dark)');
     mq.addEventListener('change', apply);
     return () => mq.removeEventListener('change', apply);
   }, [settings.theme]);
+
+  const toggleTheme = useCallback(() => {
+    const nextDark = !resolveDark(useStore.getState().settings.theme);
+    updateSettings({ theme: nextDark ? 'dark' : 'light' });
+  }, [updateSettings]);
 
   // "Open with" from the OS (double-click / Finder) and CLI arguments.
   useEffect(() => {
@@ -78,8 +98,6 @@ export default function App() {
           'lightpen:open-path',
           (event) => void openPath(event.payload),
         );
-
-        // Native menu → same actions as the toolbar / shortcuts.
         const navigate: Record<string, () => void> = {
           open: () => window.dispatchEvent(new CustomEvent('lightpen:open-dialog')),
           undo: () => useStore.getState().undo(),
@@ -142,33 +160,39 @@ export default function App() {
   }, []);
 
   const exportPdf = useCallback(async () => {
-    // Invoked from the toolbar and from the native File menu.
     const state = useStore.getState();
     const doc = state.pdf;
     if (!doc) return;
-    // Exporting reads the live annotations; keep the sidecar in step with them.
-    await flushAutosave();
-    const bytes = await buildAnnotatedPdf(doc.bytes, state.annotations.all);
-    const out = doc.name.replace(/\.pdf$/i, '') + '.annotated.pdf';
-    await saveBytesAs(out, bytes);
+    try {
+      await flushAutosave();
+      const bytes = await buildAnnotatedPdf(doc.bytes, state.annotations.all);
+      const out = doc.name.replace(/\.pdf$/i, '') + '.annotated.pdf';
+      await saveBytesAs(out, bytes);
+    } catch {
+      // Prevent unhandled promise rejection if PDF save is cancelled or fails.
+    }
   }, []);
 
   const exportPng = useCallback(async () => {
     const pageCanvas = document.querySelector<HTMLCanvasElement>('.page-canvas');
     const inkCanvas = document.querySelector<HTMLCanvasElement>('.ink-canvas');
     if (!pageCanvas || !inkCanvas) return;
-    const out = document.createElement('canvas');
-    out.width = pageCanvas.width;
-    out.height = pageCanvas.height;
-    const ctx = out.getContext('2d');
-    if (!ctx) return;
-    ctx.drawImage(pageCanvas, 0, 0);
-    ctx.drawImage(inkCanvas, 0, 0);
-    const blob = await new Promise<Blob | null>((resolve) => out.toBlob(resolve, 'image/png'));
-    if (!blob) return;
-    const bytes = new Uint8Array(await blob.arrayBuffer());
-    const name = (pdfName ?? 'page').replace(/\.pdf$/i, '') + `-page-${currentPage + 1}.png`;
-    await saveBytesAs(name, bytes);
+    try {
+      const out = document.createElement('canvas');
+      out.width = pageCanvas.width;
+      out.height = pageCanvas.height;
+      const ctx = out.getContext('2d');
+      if (!ctx) return;
+      ctx.drawImage(pageCanvas, 0, 0);
+      ctx.drawImage(inkCanvas, 0, 0);
+      const blob = await new Promise<Blob | null>((resolve) => out.toBlob(resolve, 'image/png'));
+      if (!blob) return;
+      const bytes = new Uint8Array(await blob.arrayBuffer());
+      const name = (pdfName ?? 'page').replace(/\.pdf$/i, '') + `-page-${currentPage + 1}.png`;
+      await saveBytesAs(name, bytes);
+    } catch {
+      // Prevent unhandled promise rejection on export failure.
+    }
   }, [pdfName, currentPage]);
 
   // Native menu export commands.
@@ -221,16 +245,19 @@ export default function App() {
         s.setTool('eraser');
       } else if (e.key.toLowerCase() === 'b') {
         s.setTool('pen');
+      } else if (!mod && e.key.toLowerCase() === 'd') {
+        toggleTheme();
+      } else if (!mod && e.key.toLowerCase() === 'c') {
+        s.setPermissionOpen(true);
       } else if (e.key === '?') {
         s.setShortcutsOpen(true);
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, []);
+  }, [toggleTheme]);
 
-  // Size of the page on screen, published by the viewer. Stored as a stable
-  // reference: a selector returning a fresh object would re-render forever.
+  // Size of the page on screen, published by the viewer.
   const pageSize = useStore((s) => s.currentPageSize);
 
   return (
@@ -240,17 +267,29 @@ export default function App() {
         onSample={() => void loadSample()}
         onExportPdf={() => void exportPdf()}
         onExportPng={() => void exportPng()}
+        isDark={isDark}
+        onToggleTheme={toggleTheme}
       />
       <main className="app-main">
         <section className="viewer-section" aria-label="PDF viewer">
-          <PdfViewer pdfBytes={pdfBytes} pdfName={pdfName} onPdfLoaded={onPdfLoaded} />
+          <ErrorBoundary title={t('viewer.crashTitle')} reloadLabel={t('viewer.crashReload')}>
+            <PdfViewer pdfBytes={pdfBytes} pdfName={pdfName} onPdfLoaded={onPdfLoaded} />
+          </ErrorBoundary>
         </section>
         <aside className="side-panel">
           <CameraPreview pageSize={pageSize} onGesture={noteGesture} />
-          <p className="side-hint">{t('app.tagline')}</p>
-          <button type="button" className="link-button" onClick={() => setCheatSheetOpen(true)}>
-            ✋ {t('toolbar.cheatSheet')}
-          </button>
+          <div className="side-footer">
+            <p className="side-hint">{t('app.tagline')}</p>
+            <button
+              type="button"
+              className="link-button"
+              aria-label={`Open ${t('toolbar.cheatSheet')}`}
+              onClick={() => setCheatSheetOpen(true)}
+            >
+              <HandIcon />
+              <span>{t('toolbar.cheatSheet')}</span>
+            </button>
+          </div>
         </aside>
       </main>
       <PermissionDialog />

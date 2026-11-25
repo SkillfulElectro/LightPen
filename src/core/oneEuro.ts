@@ -1,5 +1,5 @@
 /**
- * One Euro filter (Casiez, Roussel &amp;amp; Vogel, 2012) — adaptive low-pass
+ * One Euro filter (Casiez, Roussel & Vogel, 2012) — adaptive low-pass
  * smoothing that removes jitter at rest while keeping latency low in motion.
  * Pure logic, no DOM. See https://github.com/casiez/OneEuroFilter
  */
@@ -13,7 +13,8 @@ export interface OneEuroParams {
 const DEFAULT_PARAMS: OneEuroParams = { minCutoff: 1.2, beta: 0.02, dCutoff: 1.0 };
 
 function alpha(cutoff: number, dt: number): number {
-  const tau = 1 / (2 * Math.PI * cutoff);
+  const safeCutoff = Number.isFinite(cutoff) && cutoff > 0 ? cutoff : 1.0;
+  const tau = 1 / (2 * Math.PI * safeCutoff);
   return 1 / (1 + tau / dt);
 }
 
@@ -40,6 +41,10 @@ export class OneEuroFilter {
   }
 
   filter(x: number, timestampMs: number): number {
+    // Reject non-finite inputs so a single bad landmark never poisons future frames with NaN.
+    if (!Number.isFinite(x) || !Number.isFinite(timestampMs)) {
+      return this.xPrev ?? 0;
+    }
     if (this.xPrev === null || this.tPrev === null) {
       this.xPrev = x;
       this.tPrev = timestampMs;

@@ -6,13 +6,13 @@
  * PDF space: points, bottom-left origin.
  * Canvas space: CSS pixels, top-left origin.
  */
-
 import type { CalibrationRect, CameraPoint, PageSize, PdfPoint } from './types';
 
 /** Default calibration: full camera frame. */
 export const FULL_FRAME_CALIBRATION: CalibrationRect = { x0: 0, y0: 0, x1: 1, y1: 1 };
 
 export function clamp(v: number, lo: number, hi: number): number {
+  if (!Number.isFinite(v)) return lo;
   return Math.min(hi, Math.max(lo, v));
 }
 
@@ -32,25 +32,63 @@ export function cameraToPage(
   const cal = calibration ?? FULL_FRAME_CALIBRATION;
   const w = Math.max(cal.x1 - cal.x0, 1e-6);
   const h = Math.max(cal.y1 - cal.y0, 1e-6);
-  let nx = (point.x - cal.x0) / w;
-  let ny = (point.y - cal.y0) / h;
+  const px = Number.isFinite(point.x) ? point.x : 0.5;
+  const py = Number.isFinite(point.y) ? point.y : 0.5;
+  let nx = (px - cal.x0) / w;
+  let ny = (py - cal.y0) / h;
   if (mirrored) nx = 1 - nx;
   nx = clamp(nx, 0, 1);
   ny = clamp(ny, 0, 1);
-  return { x: nx * page.width, y: (1 - ny) * page.height };
+  const pw = Number.isFinite(page.width) && page.width > 0 ? page.width : 612;
+  const ph = Number.isFinite(page.height) && page.height > 0 ? page.height : 792;
+  return { x: nx * pw, y: (1 - ny) * ph };
 }
 
 /** Clamp a PDF point inside the page with a small margin. */
 export function clampToPage(point: PdfPoint, page: PageSize, margin = 0): PdfPoint {
+  const pw = Number.isFinite(page.width) && page.width > 0 ? page.width : 612;
+  const ph = Number.isFinite(page.height) && page.height > 0 ? page.height : 792;
   return {
-    x: clamp(point.x, margin, Math.max(page.width - margin, margin)),
-    y: clamp(point.y, margin, Math.max(page.height - margin, margin)),
+    x: clamp(point.x, margin, Math.max(pw - margin, margin)),
+    y: clamp(point.y, margin, Math.max(ph - margin, margin)),
   };
 }
 
 /** Distance between two PDF points. */
 export function pdfDistance(a: PdfPoint, b: PdfPoint): number {
   return Math.hypot(a.x - b.x, a.y - b.y);
+}
+
+/**
+ * Compute safe physical backing-store dimensions and effective scale for a
+ * stacked PDF/ink/cursor `<canvas>`. Caps edge length and total pixel area so
+ * high zoom (up to 400%) on HiDPI screens can never exhaust WebView/GPU memory
+ * and crash the renderer when writing on PDFs.
+ */
+export function computeSafeCanvasSize(
+  cssWidth: number,
+  cssHeight: number,
+  dpr: number,
+  maxEdge = 4096,
+  maxPixels = 12_000_000,
+): { width: number; height: number; scaleX: number; scaleY: number; effectiveDpr: number } {
+  const safeW = Number.isFinite(cssWidth) && cssWidth > 0 ? cssWidth : 1;
+  const safeH = Number.isFinite(cssHeight) && cssHeight > 0 ? cssHeight : 1;
+  const requestedDpr = Number.isFinite(dpr) && dpr > 0 ? Math.min(dpr, 2) : 1;
+
+  const edgeLimit = Math.min(maxEdge / safeW, maxEdge / safeH);
+  const areaLimit = Math.sqrt(maxPixels / (safeW * safeH));
+  const effectiveDpr = Math.max(0.1, Math.min(requestedDpr, edgeLimit, areaLimit));
+
+  const width = Math.max(1, Math.floor(safeW * effectiveDpr));
+  const height = Math.max(1, Math.floor(safeH * effectiveDpr));
+  return {
+    width,
+    height,
+    scaleX: width / safeW,
+    scaleY: height / safeH,
+    effectiveDpr,
+  };
 }
 
 /**
@@ -110,9 +148,10 @@ export function pdfToViewport(point: PdfPoint, m: ViewportMatrix): { x: number; 
 
 /** Canvas CSS pixel → PDF point (inverse of `pdfToViewport`). */
 export function viewportToPdf(x: number, y: number, m: ViewportMatrix): PdfPoint {
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return { x: 0, y: 0 };
   const [a, b, c, d, e, f] = m;
   const det = a * d - b * c;
-  if (det === 0) return { x: 0, y: 0 };
+  if (!Number.isFinite(det) || Math.abs(det) < 1e-12) return { x: 0, y: 0 };
   const dx = x - e;
   const dy = y - f;
   return { x: (d * dx - c * dy) / det, y: (-b * dx + a * dy) / det };
@@ -127,8 +166,9 @@ export function pageDisplaySize(
   rotation: PageRotation,
   scale: number,
 ): { width: number; height: number } {
-  const w = page.width * scale;
-  const h = page.height * scale;
+  const s = Number.isFinite(scale) && scale > 0 ? scale : 1;
+  const w = page.width * s;
+  const h = page.height * s;
   return rotation === 90 || rotation === 270 ? { width: h, height: w } : { width: w, height: h };
 }
 
@@ -142,7 +182,7 @@ export function pageViewportMatrix(
   rotation: PageRotation,
   scale: number,
 ): ViewportMatrix {
-  const s = scale;
+  const s = Number.isFinite(scale) && scale > 0 ? scale : 1;
   const w = page.width * s;
   const h = page.height * s;
   switch (rotation) {

@@ -1,7 +1,6 @@
 /**
  * Settings validation/merging. Pure logic, no DOM.
  */
-
 import { DEFAULT_SETTINGS, type Settings } from './types';
 
 function num(v: unknown, fallback: number, lo: number, hi: number): number {
@@ -29,10 +28,15 @@ export function sanitizeSettings(raw: unknown): Settings {
     typeof cal.y0 === 'number' &&
     typeof cal.x1 === 'number' &&
     typeof cal.y1 === 'number' &&
+    Number.isFinite(cal.x0) &&
+    Number.isFinite(cal.y0) &&
+    Number.isFinite(cal.x1) &&
+    Number.isFinite(cal.y1) &&
     cal.x1 > cal.x0 &&
     cal.y1 > cal.y0
       ? { x0: cal.x0, y0: cal.y0, x1: cal.x1, y1: cal.y1 }
       : null;
+
   return {
     pinchThreshold: pinch,
     pinchReleaseThreshold: Math.max(pinchRelease, pinch + 0.02),
@@ -44,6 +48,8 @@ export function sanitizeSettings(raw: unknown): Settings {
     mirrored: bool(r.mirrored, d.mirrored),
     showPreview: bool(r.showPreview, d.showPreview),
     theme: r.theme === 'light' || r.theme === 'dark' ? r.theme : 'system',
+    computeBackend:
+      r.computeBackend === 'gpu' || r.computeBackend === 'cpu' ? r.computeBackend : 'hybrid',
     language: str(r.language, d.language),
     penColor: str(r.penColor, d.penColor),
     penWidth: num(r.penWidth, d.penWidth, 0.5, 20),

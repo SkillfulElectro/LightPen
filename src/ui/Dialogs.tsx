@@ -1,5 +1,4 @@
 /** Modal dialogs: camera permission rationale, settings, cheat sheet, shortcuts. */
-
 import { useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
@@ -8,8 +7,10 @@ import {
   sensitivityToPinchThreshold,
 } from '../core/settings';
 import { LANGUAGES, initI18n } from '../i18n';
-import type { GestureMode } from '../core/types';
+import type { ComputeBackend, GestureMode } from '../core/types';
+import { getComputeCapabilities } from '../platform/mediapipe';
 import { useStore } from '../store/useStore';
+import { CloseIcon } from './Icons';
 import { PauseIllustration } from './illustrations';
 import { startTracking } from './trackingHandle';
 
@@ -23,7 +24,6 @@ function Modal({
   children: React.ReactNode;
 }) {
   const dialogRef = useRef<HTMLDivElement>(null);
-
   // Focus the dialog on open and restore focus when it closes (a11y).
   useEffect(() => {
     const previous = document.activeElement as HTMLElement | null;
@@ -51,8 +51,13 @@ function Modal({
       >
         <div className="modal-header">
           <h2>{title}</h2>
-          <button type="button" onClick={onClose} aria-label={title + ' — close'}>
-            ✕
+          <button
+            type="button"
+            className="icon-btn"
+            onClick={onClose}
+            aria-label={title + ' — close'}
+          >
+            <CloseIcon />
           </button>
         </div>
         <div className="modal-body">{children}</div>
@@ -98,8 +103,33 @@ export function SettingsDialog() {
   const reset = useStore((s) => s.resetSettings);
   const requestCalibration = useStore((s) => s.requestCalibration);
   if (!open) return null;
+
+  const caps = getComputeCapabilities();
+  const hwSummary = `${caps.cpuCores} CPU · ${
+    caps.hasWebGL2 ? 'WebGL2 GPU' : caps.hasWebGL ? 'WebGL GPU' : 'CPU WASM'
+  }${caps.gpuRenderer ? ` (${caps.gpuRenderer})` : ''}`;
+
   return (
     <Modal title={t('settings.title')} onClose={() => setOpen(false)}>
+      <fieldset className="settings-section">
+        <legend>{t('settings.computeBackend')}</legend>
+        <label>
+          {t('settings.computeBackend')}
+          <select
+            value={settings.computeBackend}
+            onChange={(e) => update({ computeBackend: e.target.value as ComputeBackend })}
+            aria-describedby="compute-backend-help"
+          >
+            <option value="hybrid">{t('settings.backendHybrid')}</option>
+            <option value="gpu">{t('settings.backendGpu')}</option>
+            <option value="cpu">{t('settings.backendCpu')}</option>
+          </select>
+        </label>
+        <p className="settings-help" id="compute-backend-help">
+          {t('settings.backendHelp', { hardware: hwSummary })}
+        </p>
+      </fieldset>
+
       <label>
         {t('settings.pinchThreshold')} (
         {Math.round(pinchThresholdToSensitivity(settings.pinchThreshold) * 100)}%)
@@ -118,6 +148,7 @@ export function SettingsDialog() {
           }}
         />
       </label>
+
       <label>
         {t('settings.smoothing')} ({settings.smoothingMinCutoff.toFixed(1)})
         <input
@@ -129,6 +160,7 @@ export function SettingsDialog() {
           onChange={(e) => update({ smoothingMinCutoff: Number(e.target.value) })}
         />
       </label>
+
       <label>
         {t('settings.smoothingBeta')} ({settings.smoothingBeta.toFixed(2)})
         <input
@@ -140,8 +172,9 @@ export function SettingsDialog() {
           onChange={(e) => update({ smoothingBeta: Number(e.target.value) })}
         />
       </label>
+
       <label>
-        {t('settings.penWidth')} ({settings.penWidth.toFixed(1)})
+        {t('settings.penWidth')} ({settings.penWidth.toFixed(1)} pt)
         <input
           type="range"
           min={0.5}
@@ -151,6 +184,7 @@ export function SettingsDialog() {
           onChange={(e) => update({ penWidth: Number(e.target.value) })}
         />
       </label>
+
       <label>
         {t('settings.penColor')}
         <input
@@ -160,6 +194,7 @@ export function SettingsDialog() {
           aria-label={t('settings.penColor')}
         />
       </label>
+
       <label>
         {t('settings.mirrored')}
         <select
@@ -170,6 +205,7 @@ export function SettingsDialog() {
           <option value="off">{t('settings.mirrorOff')}</option>
         </select>
       </label>
+
       <label>
         {t('settings.preview')}
         <select
@@ -180,6 +216,7 @@ export function SettingsDialog() {
           <option value="off">{t('settings.previewOff')}</option>
         </select>
       </label>
+
       <label>
         {t('settings.dominantHand')}
         <select
@@ -191,6 +228,7 @@ export function SettingsDialog() {
           <option value="right">{t('settings.right')}</option>
         </select>
       </label>
+
       <label>
         {t('settings.theme')}
         <select
@@ -202,6 +240,7 @@ export function SettingsDialog() {
           <option value="dark">{t('settings.dark')}</option>
         </select>
       </label>
+
       <label>
         {t('settings.language')}
         <select
@@ -218,7 +257,8 @@ export function SettingsDialog() {
           ))}
         </select>
       </label>
-      <fieldset>
+
+      <fieldset className="settings-section">
         <legend>{t('settings.gestures')}</legend>
         <label>
           {t('settings.gestureMode')}
@@ -236,9 +276,6 @@ export function SettingsDialog() {
             ? t('settings.modeTouchHelp')
             : t('settings.modeAirHelp')}
         </p>
-        {/* The gesture switches that follow only exist in air mode; touch mode
-            has the phone vocabulary instead. Hidden rather than removed so the
-            stored choices survive a round trip through the other mode. */}
         {settings.gestureMode === 'air' && (
           <>
             <label className="check">
@@ -282,7 +319,8 @@ export function SettingsDialog() {
           </label>
         )}
       </fieldset>
-      <fieldset>
+
+      <fieldset className="settings-section">
         <legend>{t('settings.calibration')}</legend>
         <p className="settings-help">
           {settings.calibration
@@ -307,6 +345,7 @@ export function SettingsDialog() {
           </button>
         </div>
       </fieldset>
+
       <div className="modal-actions">
         <button type="button" onClick={reset}>
           {t('settings.reset')}
@@ -351,7 +390,10 @@ export function CheatSheet() {
       <ul className="cheat-list">
         {gestures.map(([icon, label]) => (
           <li key={label}>
-            {icon} {label}
+            <span className="cheat-icon" aria-hidden="true">
+              {icon}
+            </span>
+            <span>{label}</span>
           </li>
         ))}
       </ul>
@@ -370,6 +412,7 @@ export function ShortcutsHelp() {
     ['Ctrl/⌘+Shift+Z', t('shortcuts.redo')],
     ['E', t('shortcuts.eraser')],
     ['B', t('shortcuts.pen')],
+    ['D', t('shortcuts.darkMode')],
     ['Ctrl/⌘ + +', t('shortcuts.zoomIn')],
     ['Ctrl/⌘ + −', t('shortcuts.zoomOut')],
     ['0', t('shortcuts.fit')],

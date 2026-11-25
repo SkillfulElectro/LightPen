@@ -81,7 +81,10 @@ export class AirTouchEventBridge {
   private lastHoverEl: HTMLElement | null = null;
 
   /** Inspect element under (x, y) and dispatch hover mousemove/pointermove. */
-  move(clientX: number, clientY: number): { target: Element | null; interactive: HTMLElement | null } {
+  move(
+    clientX: number,
+    clientY: number,
+  ): { target: Element | null; interactive: HTMLElement | null } {
     if (typeof document === 'undefined' || typeof document.elementFromPoint !== 'function') {
       return { target: null, interactive: null };
     }

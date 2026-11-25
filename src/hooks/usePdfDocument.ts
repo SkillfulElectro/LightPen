@@ -1,11 +1,11 @@
 /**
- * pdf.js document handling: loading, page sizes, queued rendering with
- * cancellation and canvas cleanup (lazy rendering for large documents).
+ * pdf.js document handling: loading, page sizes, serialized render queue with
+ * awaited cancellation, safe canvas memory budgets, and canvas cleanup.
  */
-
 import { useCallback, useEffect, useRef, useState } from 'react';
 import * as pdfjs from 'pdfjs-dist';
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
+import { computeSafeCanvasSize } from '../core/coords';
 import type { PageSize } from '../core/types';
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
@@ -16,7 +16,6 @@ pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
  * worker cannot be imported, so tests pass `pdfjs-dist/legacy/build/pdf.mjs`.
  */
 export type PdfJsApi = Pick<typeof pdfjs, 'getDocument'>;
-
 type PdfModule = typeof pdfjs & { default?: typeof pdfjs };
 
 /** Resolve a dynamically imported pdf.js module (ESM namespace or default). */
@@ -30,7 +29,6 @@ export function setPdfJsApi(api: PdfJsApi): void {
 }
 
 let activeApi: PdfJsApi | null = null;
-
 function api(): PdfJsApi {
   return activeApi ?? pdfjs;
 }
@@ -78,8 +76,9 @@ export async function loadPdf(bytes: Uint8Array): Promise<LoadedPdf> {
   try {
     const first = await doc.getPage(1);
     const viewport = first.getViewport({ scale: 1 });
-    pageSizes[0] = { width: viewport.width, height: viewport.height };
-    first.cleanup();
+    if (Number.isFinite(viewport.width) && Number.isFinite(viewport.height)) {
+      pageSizes[0] = { width: viewport.width, height: viewport.height };
+    }
   } catch {
     // Fall back to Letter; the viewer reports real page errors.
   }
@@ -99,60 +98,102 @@ export async function getPageGeometry(
   pageIndex: number,
   cache: (PageGeometry | undefined)[],
 ): Promise<PageGeometry> {
-  const cached = cache[pageIndex];
+  const safeIndex = Number.isInteger(pageIndex) && pageIndex >= 0 ? pageIndex : 0;
+  const cached = cache[safeIndex];
   if (cached) return cached;
-  const page = await doc.getPage(pageIndex + 1);
+  const page = await doc.getPage(safeIndex + 1);
   const viewport = page.getViewport({ scale: 1 });
   const rotate = ((page.rotate % 360) + 360) % 360;
   const geometry: PageGeometry = {
-    width: viewport.width,
-    height: viewport.height,
+    width: Number.isFinite(viewport.width) && viewport.width > 0 ? viewport.width : 612,
+    height: Number.isFinite(viewport.height) && viewport.height > 0 ? viewport.height : 792,
     rotate: (rotate === 90 || rotate === 180 || rotate === 270
       ? rotate
       : 0) as PageGeometry['rotate'],
   };
-  page.cleanup();
-  cache[pageIndex] = geometry;
+  cache[safeIndex] = geometry;
   return geometry;
 }
 
 /**
- * Render a page into a canvas with a render queue: starting a new render
- * cancels the previous one. Only the visible page is rendered (lazy).
+ * Render a page into a canvas with a strictly serialized render queue:
+ * starting a new render cancels any active pdf.js RenderTask and *awaits* its
+ * cancellation before reusing the canvas, preventing the fatal pdf.js crash
+ * "Cannot use the same canvas during multiple render() operations".
  */
 export function usePageRenderer(doc: pdfjs.PDFDocumentProxy | null) {
   const renderTaskRef = useRef<pdfjs.RenderTask | null>(null);
+  const renderGenRef = useRef(0);
   const [rendering, setRendering] = useState(false);
 
   const renderPage = useCallback(
     async (pageIndex: number, canvas: HTMLCanvasElement, scale: number): Promise<void> => {
       if (!doc) return;
-      try {
-        renderTaskRef.current?.cancel();
-      } catch {
-        // ignore
+      if (!Number.isInteger(pageIndex) || pageIndex < 0 || pageIndex >= doc.numPages) return;
+      if (!Number.isFinite(scale) || scale <= 0) return;
+
+      const gen = ++renderGenRef.current;
+
+      // Cancel any in-flight render and wait for pdf.js to release the canvas.
+      const prevTask = renderTaskRef.current;
+      if (prevTask) {
+        renderTaskRef.current = null;
+        try {
+          prevTask.cancel();
+        } catch {
+          // ignore
+        }
+        try {
+          await prevTask.promise;
+        } catch {
+          // Expected RenderingCancelledException when superseded.
+        }
       }
+
+      if (gen !== renderGenRef.current) return;
+
       setRendering(true);
       try {
         const page = await doc.getPage(pageIndex + 1);
+        if (gen !== renderGenRef.current) return;
+
         const viewport = page.getViewport({ scale });
-        const dpr = Math.min(window.devicePixelRatio || 1, 2);
-        canvas.width = Math.floor(viewport.width * dpr);
-        canvas.height = Math.floor(viewport.height * dpr);
+        if (!Number.isFinite(viewport.width) || !Number.isFinite(viewport.height)) return;
+
+        const safe = computeSafeCanvasSize(
+          viewport.width,
+          viewport.height,
+          window.devicePixelRatio || 1,
+        );
+        canvas.width = safe.width;
+        canvas.height = safe.height;
         canvas.style.width = `${viewport.width}px`;
         canvas.style.height = `${viewport.height}px`;
+
         const ctx = canvas.getContext('2d');
-        if (!ctx) return;
-        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        if (!ctx || gen !== renderGenRef.current) return;
+        ctx.setTransform(safe.scaleX, 0, 0, safe.scaleY, 0, 0);
+
         const task = page.render({ canvasContext: ctx, viewport });
         renderTaskRef.current = task;
         await task.promise;
-        page.cleanup();
+        if (renderTaskRef.current === task) {
+          renderTaskRef.current = null;
+        }
       } catch (err) {
-        // RenderingCancelledException is expected when superseded.
-        if ((err as { name?: string })?.name !== 'RenderingCancelledException') throw err;
+        const name = (err as { name?: string })?.name ?? '';
+        const message = (err as { message?: string })?.message ?? '';
+        // RenderingCancelledException or destroyed document is expected on page/doc switch.
+        if (
+          name !== 'RenderingCancelledException' &&
+          !/Rendering cancelled|Transport destroyed/i.test(message)
+        ) {
+          throw err;
+        }
       } finally {
-        setRendering(false);
+        if (gen === renderGenRef.current) {
+          setRendering(false);
+        }
       }
     },
     [doc],
@@ -160,13 +201,16 @@ export function usePageRenderer(doc: pdfjs.PDFDocumentProxy | null) {
 
   useEffect(() => {
     return () => {
+      renderGenRef.current += 1;
+      const task = renderTaskRef.current;
+      renderTaskRef.current = null;
       try {
-        renderTaskRef.current?.cancel();
+        task?.cancel();
       } catch {
         // ignore
       }
     };
-  }, []);
+  }, [doc]);
 
   return { renderPage, rendering };
 }

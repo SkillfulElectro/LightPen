@@ -3,9 +3,11 @@
  * with undo/redo, eraser hit-testing and sidecar serialization.
  * Pure logic, no DOM.
  */
-
 import type { PdfPoint, SidecarData, Stroke } from './types';
 import { pdfDistance } from './coords';
+
+/** Upper bound on points in a single stroke to prevent unbounded memory growth. */
+export const MAX_STROKE_POINTS = 10_000;
 
 let idCounter = 0;
 
@@ -14,22 +16,32 @@ export function newStrokeId(): string {
   return `s${Date.now().toString(36)}-${idCounter.toString(36)}`;
 }
 
+function isValidPoint(point: PdfPoint | null | undefined): point is PdfPoint {
+  return (
+    point !== null && point !== undefined && Number.isFinite(point.x) && Number.isFinite(point.y)
+  );
+}
+
 export function createStroke(page: number, color: string, width: number, first: PdfPoint): Stroke {
+  const safePoint: PdfPoint = isValidPoint(first) ? { x: first.x, y: first.y } : { x: 0, y: 0 };
+  const safeWidth = Number.isFinite(width) && width > 0 ? width : 2.5;
   return {
     id: newStrokeId(),
-    page,
+    page: Number.isInteger(page) && page >= 0 ? page : 0,
     color,
-    width,
-    points: [first],
+    width: safeWidth,
+    points: [safePoint],
     createdAt: Date.now(),
   };
 }
 
-/** Append a point if it is at least `minDistance` from the last point. */
+/** Append a point if it is finite, within the point cap, and at least `minDistance` from the last point. */
 export function addPoint(stroke: Stroke, point: PdfPoint, minDistance = 0.5): boolean {
+  if (!isValidPoint(point)) return false;
+  if (stroke.points.length >= MAX_STROKE_POINTS) return false;
   const last = stroke.points[stroke.points.length - 1];
   if (last && pdfDistance(last, point) < minDistance) return false;
-  stroke.points.push(point);
+  stroke.points.push({ x: point.x, y: point.y });
   return true;
 }
 
@@ -45,6 +57,7 @@ export function pointToSegmentDistance(p: PdfPoint, a: PdfPoint, b: PdfPoint): n
 
 /** True when the stroke passes within `radius` of `point`. */
 export function strokeHit(stroke: Stroke, point: PdfPoint, radius: number): boolean {
+  if (!isValidPoint(point) || !Number.isFinite(radius) || radius < 0) return false;
   const pts = stroke.points;
   if (pts.length === 0) return false;
   if (pts.length === 1) return pdfDistance(pts[0]!, point) <= radius;
@@ -148,18 +161,27 @@ export class AnnotationStore {
     for (const s of raw) {
       if (typeof s !== 'object' || s === null) continue;
       const st = s as Partial<Stroke>;
-      if (typeof st.page !== 'number' || !Array.isArray(st.points)) continue;
+      if (typeof st.page !== 'number' || !Number.isInteger(st.page) || st.page < 0) continue;
+      if (!Array.isArray(st.points)) continue;
       const points = st.points.filter(
         (p): p is PdfPoint =>
-          typeof p === 'object' && p !== null && typeof p.x === 'number' && typeof p.y === 'number',
+          typeof p === 'object' &&
+          p !== null &&
+          typeof p.x === 'number' &&
+          typeof p.y === 'number' &&
+          Number.isFinite(p.x) &&
+          Number.isFinite(p.y),
       );
       if (points.length === 0) continue;
       store.strokes.push({
         id: typeof st.id === 'string' ? st.id : newStrokeId(),
         page: st.page,
         color: typeof st.color === 'string' ? st.color : '#e11d48',
-        width: typeof st.width === 'number' && st.width > 0 ? st.width : 2.5,
-        points,
+        width:
+          typeof st.width === 'number' && Number.isFinite(st.width) && st.width > 0
+            ? st.width
+            : 2.5,
+        points: points.slice(0, MAX_STROKE_POINTS),
         createdAt: typeof st.createdAt === 'number' ? st.createdAt : Date.now(),
       });
     }
