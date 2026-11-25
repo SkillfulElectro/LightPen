@@ -108,6 +108,8 @@ export type GestureMode = 'air' | 'touch';
 
 export type DominantHand = 'left' | 'right' | 'auto';
 export type Theme = 'light' | 'dark' | 'system';
+export type ComputeBackend = 'hybrid' | 'gpu' | 'cpu';
+export type ActiveComputeBackend = 'CPU+GPU' | 'GPU' | 'CPU';
 
 /** User-tunable settings (persisted). */
 export interface Settings {
@@ -120,12 +122,13 @@ export interface Settings {
   cameraId: string | null;
   mirrored: boolean;
   /**
-   * Show the live self-view (camera preview) in the panel. Off by default:
-   * tracking, the hand cursor and hints work without watching yourself.
+   * Show the live self-view (camera preview) in the panel.
    * Hiding the preview never hides the "camera is on" indicator.
    */
   showPreview: boolean;
   theme: Theme;
+  /** Compute backend for hand tracking & preprocessing: hybrid CPU+GPU, GPU-only, or CPU-only. */
+  computeBackend: ComputeBackend;
   language: string;
   penColor: string;
   penWidth: number;
@@ -149,6 +152,7 @@ export const DEFAULT_SETTINGS: Settings = {
   mirrored: true,
   showPreview: true,
   theme: 'system',
+  computeBackend: 'hybrid',
   language: 'en',
   penColor: '#e11d48',
   penWidth: 2.5,

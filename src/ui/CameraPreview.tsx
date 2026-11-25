@@ -1,10 +1,12 @@
 /**
- * Camera preview + hand-tracking loop.
- * - Live face & hand video with 21-point hand-skeleton overlay.
- * - Real-time air touch simulation & dynamic mouse cursor styling.
- * - Live store reads inside frame loop (no stale closures on tool/color/mode changes).
- * - Runtime GPU -> CPU automatic fallback for both thrown errors and silent
- *   zero-detection streams so detection works reliably on every device.
+ * Camera preview + high-FPS hybrid CPU+GPU hand-tracking loop.
+ * - Hybrid CPU + GPU acceleration via MediaPipe high-performance WebGL2 GPU
+ *   delegate paired with multi-core CPU preprocessing & InferenceLoadBalancer.
+ * - Eliminates main-thread stalls: skips DOM `elementFromPoint` reflows while
+ *   actively writing ink, gates tutorial gesture notifications on `tutorialOpen`,
+ *   and deduplicates tracking store updates.
+ * - Runtime GPU -> CPU automatic failover on thrown errors, silent zero-hand
+ *   streams, or sustained GPU latency spikes.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -15,6 +17,7 @@ import {
 } from '../core/airTouchSimulator';
 import { addPoint, createStroke } from '../core/annotations';
 import { videoWrapClass } from '../core/cameraDom';
+import { InferenceLoadBalancer } from '../core/computeBackend';
 import {
   cameraToPage,
   clampToPage,
@@ -47,12 +50,15 @@ import {
   closeHandLandmarker,
   detectHand,
   fallbackToCpuLandmarker,
+  getActiveBackendLabel,
   getActiveDelegate,
   getHandLandmarker,
   hasDetectedHand,
   resetDetectionSession,
+  setInferenceInputWidth,
 } from '../platform/mediapipe';
 import { useStore } from '../store/useStore';
+import { CameraIcon, CpuIcon } from './Icons';
 import {
   publishCameraStream,
   publishCameraVideo,
@@ -85,6 +91,7 @@ export default function CameraPreview({ pageSize, onGesture }: Props) {
   const updateSettings = useStore((s) => s.updateSettings);
   const active = useStore((s) => s.tracking.active);
   const fps = useStore((s) => s.tracking.fps);
+  const backend = useStore((s) => s.tracking.backend);
   const hint = useStore((s) => s.tracking.hint);
   const settings = useStore((s) => s.settings);
   const collapsed = !settings.showPreview;
@@ -155,7 +162,10 @@ export default function CameraPreview({ pageSize, onGesture }: Props) {
       publishTrackerStatus({ phase: 'loading-model', error: null, detail: null });
       let landmarker: Awaited<ReturnType<typeof getHandLandmarker>>;
       try {
-        landmarker = await getHandLandmarker();
+        landmarker = await getHandLandmarker(
+          initialSettings.computeBackend,
+          initialSettings.dominantHand,
+        );
       } catch (err) {
         const msg = t('camera.modelMissing');
         const detail = err instanceof Error ? err.message : String(err);
@@ -164,6 +174,8 @@ export default function CameraPreview({ pageSize, onGesture }: Props) {
         stop(true);
         return;
       }
+
+      setTracking({ backend: getActiveBackendLabel() });
 
       let classifier = new GestureClassifier({
         pinchThreshold: initialSettings.pinchThreshold,
@@ -183,26 +195,28 @@ export default function CameraPreview({ pageSize, onGesture }: Props) {
         beta: initialSettings.smoothingBeta,
         dCutoff: initialSettings.smoothingDCutoff,
       });
-
+      const loadBalancer = new InferenceLoadBalancer(512);
       let lastThresholdKey = `${initialSettings.pinchThreshold}:${initialSettings.pinchReleaseThreshold}:${initialSettings.enableErase}:${initialSettings.enablePageSwipe}:${initialSettings.enablePauseFist}:${initialSettings.zoomSensitivity}`;
       let lastSmoothKey = `${initialSettings.smoothingMinCutoff}:${initialSettings.smoothingBeta}:${initialSettings.smoothingDCutoff}`;
+      let lastBackendKey = `${initialSettings.computeBackend}:${initialSettings.dominantHand}`;
 
       const airBridge = new AirTouchEventBridge();
+      let lastHoverX = -9999;
+      let lastHoverY = -9999;
+      let lastInteractive: HTMLElement | null = null;
       let tapPulseSeq = 0;
       let activeStroke: Stroke | null = null;
-      let switchingToCpu = false;
+      let switchingBackend = false;
       let triedSilentCpuFallback = false;
       let scrollAccum = 0;
-
       const lightCanvas = document.createElement('canvas');
-      lightCanvas.width = 64;
-      lightCanvas.height = 48;
+      lightCanvas.width = 48;
+      lightCanvas.height = 36;
       const lightCtx = lightCanvas.getContext('2d', { willReadFrequently: true });
       let lowLight = false;
       let lastLightCheck = 0;
       let lostFrames = 0;
-      let frameSkip = 0;
-      let adaptiveSkip = 1;
+      let skipNextFrame = false;
 
       const finishStroke = () => {
         if (activeStroke && activeStroke.points.length > 0) {
@@ -220,18 +234,20 @@ export default function CameraPreview({ pageSize, onGesture }: Props) {
       const loopStartedAt = performance.now();
 
       const triggerCpuFallback = () => {
-        if (getActiveDelegate() !== 'GPU' || switchingToCpu) return;
-        switchingToCpu = true;
+        if (getActiveDelegate() !== 'GPU' || switchingBackend) return;
+        switchingBackend = true;
         void fallbackToCpuLandmarker()
           .then((cpuLm) => {
             landmarker = cpuLm;
             consecutiveErrors = 0;
+            loadBalancer.reset(384);
+            setTracking({ backend: getActiveBackendLabel() });
           })
           .catch(() => {
             // Keep existing landmarker if CPU init fails; health check will report it.
           })
           .finally(() => {
-            switchingToCpu = false;
+            switchingBackend = false;
           });
       };
 
@@ -266,14 +282,35 @@ export default function CameraPreview({ pageSize, onGesture }: Props) {
       const stopLoop = runFrameLoop(
         video,
         (nowMs) => {
-          frameSkip += 1;
-          if (frameSkip < adaptiveSkip) return;
-          frameSkip = 0;
+          if (skipNextFrame) {
+            skipNextFrame = false;
+            return;
+          }
 
           const liveState = useStore.getState();
           const liveSettings = liveState.settings;
           const liveTool = liveState.tool;
           const livePageSize = pageSizeRef.current;
+
+          // Hot-switch CPU+GPU / GPU / CPU backend if user changes Settings while running.
+          const bKey = `${liveSettings.computeBackend}:${liveSettings.dominantHand}`;
+          if (bKey !== lastBackendKey && !switchingBackend) {
+            lastBackendKey = bKey;
+            switchingBackend = true;
+            void getHandLandmarker(liveSettings.computeBackend, liveSettings.dominantHand)
+              .then((nextLm) => {
+                landmarker = nextLm;
+                consecutiveErrors = 0;
+                loadBalancer.reset(512);
+                setTracking({ backend: getActiveBackendLabel() });
+              })
+              .catch(() => {
+                // Retain previous landmarker on switch failure.
+              })
+              .finally(() => {
+                switchingBackend = false;
+              });
+          }
 
           // Hot-sync classifier & smoother whenever the user adjusts sliders live.
           const tKey = `${liveSettings.pinchThreshold}:${liveSettings.pinchReleaseThreshold}:${liveSettings.enableErase}:${liveSettings.enablePageSwipe}:${liveSettings.enablePauseFist}:${liveSettings.zoomSensitivity}`;
@@ -304,6 +341,7 @@ export default function CameraPreview({ pageSize, onGesture }: Props) {
           }
 
           let result;
+          const t0 = performance.now();
           try {
             result = detectHand(
               landmarker,
@@ -316,21 +354,37 @@ export default function CameraPreview({ pageSize, onGesture }: Props) {
           } catch {
             detectorErrors += 1;
             consecutiveErrors += 1;
-            drawOverlay(video, null, liveSettings.mirrored);
+            if (!liveSettings.showPreview) {
+              // Skip skeleton canvas work when self-view is hidden.
+            } else {
+              drawOverlay(video, null, liveSettings.mirrored);
+            }
             // Automatic GPU -> CPU recovery if GPU WebGL delegate fails at runtime.
             if (consecutiveErrors === 3) triggerCpuFallback();
             if (consecutiveErrors === 15) reportHealth();
             return;
           }
+          const inferMs = performance.now() - t0;
 
-          drawOverlay(video, result?.landmarks ?? null, liveSettings.mirrored);
+          // Hybrid CPU+GPU adaptive resolution & failover balancer.
+          const balance = loadBalancer.record(
+            inferMs,
+            getActiveDelegate(),
+            liveSettings.computeBackend === 'hybrid',
+          );
+          setInferenceInputWidth(balance.inputWidth);
+          skipNextFrame = balance.skipNextFrame;
+          if (balance.shouldFallbackToCpu) {
+            triggerCpuFallback();
+          }
+
+          if (liveSettings.showPreview) {
+            drawOverlay(video, result?.landmarks ?? null, liveSettings.mirrored);
+          }
 
           if (!result) {
             lostFrames += 1;
             scrollAccum = 0;
-            // Silent GPU WebGL driver failure: GPU delegate initialized and runs
-            // without throwing, yet never detects a hand. Switch to CPU once after
-            // ~1.5 s of empty frames so broken GPU stacks recover automatically.
             if (
               !triedSilentCpuFallback &&
               !hasDetectedHand() &&
@@ -344,6 +398,7 @@ export default function CameraPreview({ pageSize, onGesture }: Props) {
             setTracking({ handPresent: false, hint: lostFrames > 30 ? 'out-of-frame' : null });
             if (lostFrames > 8) finishStroke();
             airBridge.clearHover();
+            lastInteractive = null;
             useStore.setState({ handCursor: null, airCursor: null });
             publishLiveFrame({
               landmarks: null,
@@ -357,9 +412,10 @@ export default function CameraPreview({ pageSize, onGesture }: Props) {
             });
             return;
           }
-          lostFrames = 0;
 
-          if (lightCtx && nowMs - lastLightCheck > 500) {
+          lostFrames = 0;
+          // Sample brightness infrequently (every 1.2s) to keep CPU hot path lean.
+          if (lightCtx && nowMs - lastLightCheck > 1200) {
             lastLightCheck = nowMs;
             lightCtx.drawImage(video, 0, 0, lightCanvas.width, lightCanvas.height);
             const { data } = lightCtx.getImageData(0, 0, lightCanvas.width, lightCanvas.height);
@@ -374,9 +430,11 @@ export default function CameraPreview({ pageSize, onGesture }: Props) {
             lowLight = isLowLight(brightness);
           }
 
-          setTracking({ handPresent: true });
-          const page = useStore.getState().currentPage;
-          const tutorialOpen = useStore.getState().tutorialOpen;
+          const page = liveState.currentPage;
+          const tutorialOpen = liveState.tutorialOpen;
+          const emitTutorialGesture = (kind: string) => {
+            if (tutorialOpen) onGesture?.(kind);
+          };
 
           const updateAirCursor = (
             normPt: { x: number; y: number },
@@ -391,10 +449,24 @@ export default function CameraPreview({ pageSize, onGesture }: Props) {
               window.innerWidth,
               window.innerHeight,
             );
-            const { interactive } = airBridge.move(vp.x, vp.y);
+            // Skip DOM hit-testing (`elementFromPoint` forces layout) while writing ink
+            // or when pointer moved less than 3px — huge FPS boost!
+            const writing = gestureKind === 'pen-down' || gestureKind === 'erase';
+            let interactive = lastInteractive;
+            if (!writing) {
+              if (Math.hypot(vp.x - lastHoverX, vp.y - lastHoverY) >= 3 || didTap) {
+                lastHoverX = vp.x;
+                lastHoverY = vp.y;
+                interactive = airBridge.move(vp.x, vp.y).interactive;
+                lastInteractive = interactive;
+              }
+            } else if (lastInteractive) {
+              airBridge.clearHover();
+              lastInteractive = null;
+              interactive = null;
+            }
             if (didTap) {
               tapPulseSeq += 1;
-              // Avoid accidentally clicking "Skip tutorial" / Close while practicing air-tap.
               if (!tutorialOpen) {
                 airBridge.tap(vp.x, vp.y);
               }
@@ -427,11 +499,11 @@ export default function CameraPreview({ pageSize, onGesture }: Props) {
               livePageSize,
             );
             setTracking({
+              handPresent: true,
               hint: trackingHint(frame.handSize) ?? (lowLight ? 'low-light' : null),
             });
 
             let gestureKind: GestureKind = 'hover';
-
             if (frame.twoFingers) {
               finishStroke();
               if (frame.zoomFactor !== 1) {
@@ -440,7 +512,7 @@ export default function CameraPreview({ pageSize, onGesture }: Props) {
                 if (!tutorialOpen) {
                   useStore.getState().setZoom(useStore.getState().zoom * frame.zoomFactor);
                 }
-                onGesture?.('zoom');
+                emitTutorialGesture('zoom');
               } else {
                 gestureKind = 'scroll';
                 if (Math.abs(frame.scrollDeltaY) > 0.003) {
@@ -456,7 +528,7 @@ export default function CameraPreview({ pageSize, onGesture }: Props) {
                     airBridge.scroll(vp.x, vp.y, frame.scrollDeltaY);
                   }
                   if (Math.abs(scrollAccum) >= 0.055) {
-                    onGesture?.(scrollAccum > 0 ? 'scroll-next' : 'scroll-prev');
+                    emitTutorialGesture(scrollAccum > 0 ? 'scroll-next' : 'scroll-prev');
                     scrollAccum = 0;
                   }
                 }
@@ -464,7 +536,7 @@ export default function CameraPreview({ pageSize, onGesture }: Props) {
                   if (!tutorialOpen) {
                     useStore.getState().setCurrentPage(page + frame.pageDelta);
                   }
-                  onGesture?.(frame.pageDelta > 0 ? 'scroll-next' : 'scroll-prev');
+                  emitTutorialGesture(frame.pageDelta > 0 ? 'scroll-next' : 'scroll-prev');
                   scrollAccum = 0;
                 }
               }
@@ -487,7 +559,7 @@ export default function CameraPreview({ pageSize, onGesture }: Props) {
                 useStore.getState().eraseAt(page, palmPage, 22);
                 useStore.setState({ handCursor: { x: palmPage.x, y: palmPage.y, kind: 'erase' } });
               }
-              onGesture?.('erase');
+              emitTutorialGesture('erase');
               updateAirCursor(frame.palmCenter, 'erase', 0, false);
             } else if (frame.action === 'grab') {
               scrollAccum = 0;
@@ -518,11 +590,11 @@ export default function CameraPreview({ pageSize, onGesture }: Props) {
                   }
                 }
               }
-              onGesture?.(gestureKind);
+              emitTutorialGesture(gestureKind);
               useStore.setState({ handCursor: { x: where.x, y: where.y, kind: gestureKind } });
               updateAirCursor(smoothed, gestureKind, frame.holdProgress, false);
               if (frame.action === 'pause') {
-                onGesture?.('pause');
+                emitTutorialGesture('pause');
                 if (!tutorialOpen) {
                   stop();
                   return;
@@ -532,8 +604,8 @@ export default function CameraPreview({ pageSize, onGesture }: Props) {
               scrollAccum = 0;
               finishStroke();
               gestureKind = frame.tap ? 'tap' : frame.action === 'hover' ? 'hover' : 'none';
-              if (frame.tap) onGesture?.('tap');
-              else if (gestureKind === 'hover') onGesture?.('hover');
+              if (frame.tap) emitTutorialGesture('tap');
+              else if (gestureKind === 'hover') emitTutorialGesture('hover');
               useStore.setState({ handCursor: { x: where.x, y: where.y, kind: gestureKind } });
               updateAirCursor(smoothed, gestureKind, 0, frame.tap);
             }
@@ -554,9 +626,11 @@ export default function CameraPreview({ pageSize, onGesture }: Props) {
           // ---- Air gesture mode ----
           scrollAccum = 0;
           const g = classifier.classify(result.landmarks, nowMs);
-          setTracking({ hint: trackingHint(g.handSize) ?? (lowLight ? 'low-light' : null) });
-          onGesture?.(g.kind);
-
+          setTracking({
+            handPresent: true,
+            hint: trackingHint(g.handSize) ?? (lowLight ? 'low-light' : null),
+          });
+          emitTutorialGesture(g.kind);
           const smoothed = smoother.filter(g.indexTip.x, g.indexTip.y, nowMs);
           const pagePoint = clampToPage(
             cameraToPage(smoothed, liveSettings.calibration, livePageSize, liveSettings.mirrored),
@@ -573,6 +647,7 @@ export default function CameraPreview({ pageSize, onGesture }: Props) {
           );
 
           if (activeStroke && activeStroke.page !== page) finishStroke();
+
           if (!tutorialOpen) {
             if (g.kind === 'pen-down') {
               if (!activeStroke) {
@@ -599,10 +674,11 @@ export default function CameraPreview({ pageSize, onGesture }: Props) {
               const s = useStore.getState();
               s.setCurrentPage(s.currentPage + (g.swipe === 'next' ? 1 : -1));
             }
-            onGesture?.(`swipe-${g.swipe}`);
+            emitTutorialGesture(`swipe-${g.swipe}`);
           }
+
           if (g.pauseTriggered) {
-            onGesture?.('pause');
+            emitTutorialGesture('pause');
             if (!tutorialOpen) {
               stop();
               return;
@@ -633,17 +709,17 @@ export default function CameraPreview({ pageSize, onGesture }: Props) {
         (measuredFps) => {
           fps = measuredFps;
           const rounded = Math.round(measuredFps);
-          setTracking({ fps: rounded });
+          setTracking({ fps: rounded, backend: getActiveBackendLabel() });
           publishTrackerStatus({ fps: rounded });
-          adaptiveSkip = measuredFps < 18 ? 2 : 1;
           reportHealth();
         },
       );
+
       stopLoopRef.current = () => {
         airBridge.clearHover();
         stopLoop();
       };
-      setTracking({ active: true });
+      setTracking({ active: true, backend: getActiveBackendLabel() });
       publishTrackerStatus({ phase: 'running', error: null, detail: null });
     } catch (err) {
       const msg =
@@ -733,7 +809,6 @@ export default function CameraPreview({ pageSize, onGesture }: Props) {
       ctx.lineTo(px(pb.x), py(pb.y));
     }
     ctx.stroke();
-    ctx.fillStyle = '#22c55e';
     for (let i = 0; i < landmarks.length; i++) {
       const lm = landmarks[i]!;
       ctx.beginPath();
@@ -753,14 +828,19 @@ export default function CameraPreview({ pageSize, onGesture }: Props) {
           aria-expanded={!collapsed}
           aria-label={t(collapsed ? 'camera.expand' : 'camera.collapse')}
         >
-          📷 {t('toolbar.camera')}
+          <CameraIcon />
+          <span>{t('toolbar.camera')}</span>
         </button>
         {active && (
           <span className="camera-live-badge" role="status">
-            ● {t('camera.fps', { fps })}
+            <CpuIcon />
+            <span>
+              {t('camera.fps', { fps })} · {backend}
+            </span>
           </span>
         )}
       </div>
+
       <div className={videoWrapClass(collapsed)}>
         <video
           ref={videoRef}
@@ -772,16 +852,19 @@ export default function CameraPreview({ pageSize, onGesture }: Props) {
         />
         <canvas ref={overlayRef} className="camera-overlay" aria-hidden="true" />
       </div>
+
       <div className="camera-controls">
         <button
           type="button"
+          className={active ? 'btn-stop' : 'btn-primary'}
           onClick={() => (active ? stop() : void start())}
           aria-pressed={active}
         >
           {active ? t('camera.stop') : t('camera.start')}
         </button>
-        <label>
-          {t('settings.camera')}
+
+        <label className="field-label">
+          <span>{t('settings.camera')}</span>
           <select
             value={settings.cameraId ?? ''}
             onChange={(e) =>
@@ -797,15 +880,17 @@ export default function CameraPreview({ pageSize, onGesture }: Props) {
             ))}
           </select>
         </label>
+
         <label className="check">
           <input
             type="checkbox"
             checked={settings.mirrored}
             onChange={(e) => useStore.getState().updateSettings({ mirrored: e.target.checked })}
           />
-          {t('camera.mirrored')}
+          <span>{t('camera.mirrored')}</span>
         </label>
       </div>
+
       {error && (
         <p className="camera-error" role="alert">
           {error}

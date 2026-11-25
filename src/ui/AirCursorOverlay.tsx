@@ -3,6 +3,9 @@
  * Morphs visual mouse cursor style dynamically based on the active air touch gesture
  * (hover arrow, interactive pointer hand, pen nib, eraser ring, two-finger scroll,
  * pinch-zoom magnifier, fist grab, and air-tap ripple).
+ *
+ * Performance: only runs the rAF compositor loop while camera tracking is active,
+ * avoiding idle 60Hz CPU wakeups when writing manually.
  */
 import { useEffect, useRef } from 'react';
 import { useStore } from '../store/useStore';
@@ -30,9 +33,10 @@ function cursorSvgForStyle(style: string, color: string, holdProgress: number): 
       </svg>`;
     case 'zoom-in':
     case 'zoom-out': {
-      const sign = style === 'zoom-in'
-        ? '<path d="M13 9V17M9 13H17" stroke="#ffffff" stroke-width="2" stroke-linecap="round"/>'
-        : '<path d="M9 13H17" stroke="#ffffff" stroke-width="2" stroke-linecap="round"/>';
+      const sign =
+        style === 'zoom-in'
+          ? '<path d="M13 9V17M9 13H17" stroke="#ffffff" stroke-width="2" stroke-linecap="round"/>'
+          : '<path d="M9 13H17" stroke="#ffffff" stroke-width="2" stroke-linecap="round"/>';
       return `<svg width="30" height="30" viewBox="0 0 30 30" fill="none">
         <circle cx="13" cy="13" r="9" fill="rgba(15,23,42,0.85)" stroke="#ffffff" stroke-width="1.8"/>
         <path d="M20 20L26 26" stroke="#0f172a" stroke-width="4" stroke-linecap="round"/>
@@ -66,28 +70,34 @@ export default function AirCursorOverlay() {
   const nodeRef = useRef<HTMLDivElement>(null);
   const iconRef = useRef<HTMLDivElement>(null);
   const labelRef = useRef<HTMLSpanElement>(null);
+  const trackingActive = useStore((s) => s.tracking.active);
 
   useEffect(() => {
+    const node = nodeRef.current;
+    if (!trackingActive) {
+      if (node) node.style.opacity = '0';
+      delete document.documentElement.dataset.airCursor;
+      return;
+    }
+
     let raf = 0;
     let lastSig = '';
     const tick = () => {
       raf = requestAnimationFrame(tick);
-      const node = nodeRef.current;
+      const curNode = nodeRef.current;
       const icon = iconRef.current;
       const label = labelRef.current;
-      if (!node || !icon || !label) return;
-
+      if (!curNode || !icon || !label) return;
       const cursor = useStore.getState().airCursor;
       if (!cursor) {
-        if (node.style.opacity !== '0') {
-          node.style.opacity = '0';
-          document.documentElement.style.removeProperty('--air-cursor-style');
+        if (curNode.style.opacity !== '0') {
+          curNode.style.opacity = '0';
+          delete document.documentElement.dataset.airCursor;
         }
         return;
       }
-
-      node.style.opacity = '1';
-      node.style.transform = `translate3d(${Math.round(cursor.screenX)}px, ${Math.round(cursor.screenY)}px, 0)`;
+      curNode.style.opacity = '1';
+      curNode.style.transform = `translate3d(${Math.round(cursor.screenX)}px, ${Math.round(cursor.screenY)}px, 0)`;
       document.documentElement.dataset.airCursor = cursor.cssCursor;
 
       const sig = `${cursor.style}:${cursor.color}:${Math.round(cursor.holdProgress * 20)}`;
@@ -102,7 +112,7 @@ export default function AirCursorOverlay() {
       cancelAnimationFrame(raf);
       delete document.documentElement.dataset.airCursor;
     };
-  }, []);
+  }, [trackingActive]);
 
   return (
     <div className="air-cursor-layer" aria-hidden="true">

@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.9] - 2026-11-24
+
+### Fixed
+
+- **PDF writing crashes & OOM prevention.** Serialized `pdf.js` page rendering
+  (awaiting cancellation before reusing the canvas to prevent concurrent
+  `render()` crashes), capped HiDPI canvas backing-store pixel budgets at high
+  zoom, separated committed ink from the live stroke canvas to eliminate
+  O(N^2) redraws while drawing, added finite-number firewalls across coordinate
+  transforms, One-Euro smoothing, annotations, and PDF export, wrapped pointer
+  capture and exports defensively, and added a workspace ErrorBoundary.
+- **Low FPS tracking pipeline.** Added a hybrid CPU + GPU compute backend
+  (high-performance WebGL2 GPU delegate paired with multi-core CPU
+  preprocessing, single-hand fast path, 640x480@60fps capture, and smooth
+  adaptive resolution scaling via `InferenceLoadBalancer`), eliminated per-frame
+  DOM reflows during writing and idle 60Hz cursor loops, and deduplicated store
+  updates.
+
+### Changed
+
+- **Redesigned UI & dedicated Dark Mode.** Replaced raw emoji controls with
+  crisp vector SVG icons, modernized the studio toolbar with ink swatches and
+  live width preview, added a one-click Dark/Light mode toggle in the toolbar
+  (and `D` keyboard shortcut) with synced native `color-scheme`, refreshed
+  empty states and modal dialogs, and added a Compute Backend selector in
+  Settings.
+
 ## [0.1.8] - 2026-11-24
 
 ### Fixed
@@ -152,6 +179,7 @@ First working version.
 - **Privacy** — on-device processing only, camera stops on pause/hide, visible
   live indicator, no telemetry, strict CSP, least-privilege Tauri capabilities.
 
-[Unreleased]: https://github.com/SkillfulElectro/LightPen/compare/v0.1.8...HEAD
+[Unreleased]: https://github.com/SkillfulElectro/LightPen/compare/v0.1.9...HEAD
+[0.1.9]: https://github.com/SkillfulElectro/LightPen/compare/v0.1.8...v0.1.9
 [0.1.8]: https://github.com/SkillfulElectro/LightPen/releases/tag/v0.1.8
 [0.1.0]: https://github.com/SkillfulElectro/LightPen/releases/tag/v0.1.0

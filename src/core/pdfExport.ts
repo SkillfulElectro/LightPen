@@ -3,7 +3,6 @@
  * (SVG path strings), so the result opens in any third-party viewer.
  * Pure logic (Uint8Array in → Uint8Array out), no DOM.
  */
-
 import { LineCapStyle, PDFDocument, rgb } from 'pdf-lib';
 import { hexToRgb } from './annotations';
 import type { PageSize, Stroke } from './types';
@@ -18,7 +17,8 @@ import type { PageSize, Stroke } from './types';
  * y, which is verified by rendering the export in an independent viewer.
  */
 export function strokeToSvgPath(stroke: Stroke, pageHeight: number): string {
-  const pts = stroke.points;
+  if (!Number.isFinite(pageHeight)) return '';
+  const pts = stroke.points.filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y));
   if (pts.length === 0) return '';
   const fy = (y: number) => pageHeight - y;
   if (pts.length === 1) {
@@ -47,14 +47,16 @@ export async function buildAnnotatedPdf(
     const page = pages[stroke.page];
     if (!page) continue;
     const pageHeight = page.getHeight();
+    const path = strokeToSvgPath(stroke, pageHeight);
+    if (!path) continue;
     const { r, g, b } = hexToRgb(stroke.color);
     // Stroke only (no `color`): passing a fill colour would close and fill the
     // polyline, turning handwriting into a polygon.
-    page.drawSvgPath(strokeToSvgPath(stroke, pageHeight), {
+    page.drawSvgPath(path, {
       x: 0,
       y: pageHeight,
       borderColor: rgb(r, g, b),
-      borderWidth: Math.max(stroke.width, 0.5),
+      borderWidth: Math.max(Number.isFinite(stroke.width) ? stroke.width : 2.5, 0.5),
       borderOpacity: 1,
       borderLineCap: LineCapStyle.Round,
     });
@@ -76,12 +78,15 @@ export async function buildBlankAnnotatedPdf(
   for (const stroke of strokes) {
     const page = pages[stroke.page];
     if (!page) continue;
+    const path = strokeToSvgPath(stroke, page.getHeight());
+    if (!path) continue;
     const { r, g, b } = hexToRgb(stroke.color);
-    page.drawSvgPath(strokeToSvgPath(stroke, page.getHeight()), {
+    page.drawSvgPath(path, {
       x: 0,
       y: page.getHeight(),
       borderColor: rgb(r, g, b),
-      borderWidth: Math.max(stroke.width, 0.5),
+      borderWidth: Math.max(Number.isFinite(stroke.width) ? stroke.width : 2.5, 0.5),
+      borderOpacity: 1,
       borderLineCap: LineCapStyle.Round,
     });
   }

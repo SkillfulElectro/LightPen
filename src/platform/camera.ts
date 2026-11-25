@@ -123,8 +123,18 @@ export async function startCamera(deviceId: string | null): Promise<MediaStream>
   try {
     return await navigator.mediaDevices.getUserMedia({
       video: deviceId
-        ? { deviceId: { exact: deviceId }, width: { ideal: 1280 }, height: { ideal: 720 } }
-        : { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } },
+        ? {
+            deviceId: { exact: deviceId },
+            width: { ideal: 640 },
+            height: { ideal: 480 },
+            frameRate: { ideal: 60, min: 24 },
+          }
+        : {
+            facingMode: 'user',
+            width: { ideal: 640 },
+            height: { ideal: 480 },
+            frameRate: { ideal: 60, min: 24 },
+          },
       audio: false,
     });
   } catch (first) {

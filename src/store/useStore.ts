@@ -1,13 +1,18 @@
 /**
- * Global app state (Zustand).
- * Hot-path data (in-progress stroke, hand cursor, FPS) lives in refs,
- * never in React state, to avoid re-renders during tracking.
+ * Application state (Zustand). Hot-path coordinates (hand cursor, active stroke)
+ * live on mutable refs/state read directly by the canvas loop to avoid React re-renders.
  */
-
 import { create } from 'zustand';
 import { AnnotationStore } from '../core/annotations';
 import { sanitizeSettings } from '../core/settings';
-import type { AirCursorState, PageSize, Settings, Stroke, TutorialPace } from '../core/types';
+import type {
+  ActiveComputeBackend,
+  AirCursorState,
+  PageSize,
+  Settings,
+  Stroke,
+  TutorialPace,
+} from '../core/types';
 import { DEFAULT_SETTINGS } from '../core/types';
 import { saveSidecar } from '../platform/tauri';
 import { createSidecarWriter, restoreAnnotations as restoreFromSidecar } from './sidecar';
@@ -29,6 +34,7 @@ export interface TrackingState {
   fps: number;
   handPresent: boolean;
   hint: 'too-far' | 'too-close' | 'low-light' | 'out-of-frame' | null;
+  backend: ActiveComputeBackend;
 }
 
 interface AppState {
@@ -49,7 +55,6 @@ interface AppState {
   setFitScale: (zoom: number) => void;
   fitMode: FitMode;
   setFitMode: (mode: FitMode) => void;
-
   tool: Tool;
   setTool: (tool: Tool) => void;
 
@@ -66,6 +71,7 @@ interface AppState {
 
   tracking: TrackingState;
   setTracking: (patch: Partial<TrackingState>) => void;
+
   /** Last gesture emitted by the tracker; `seq` lets the tutorial react to repeats. */
   lastGesture: { kind: string; seq: number };
   noteGesture: (kind: string) => void;
@@ -85,10 +91,10 @@ interface AppState {
   setCheatSheetOpen: (open: boolean) => void;
   shortcutsOpen: boolean;
   setShortcutsOpen: (open: boolean) => void;
-
   /** Tutorial pacing cadence (guided/normal/quick). */
   tutorialPace: TutorialPace;
   setTutorialPace: (pace: TutorialPace) => void;
+
   /** Hot-path refs (no re-renders). */
   handCursor: { x: number; y: number; kind: string } | null;
   airCursor: AirCursorState | null;
@@ -110,7 +116,7 @@ function loadSettings(): Settings {
 export const useStore = create<AppState>((set, get) => ({
   settings: loadSettings(),
   updateSettings: (patch) => {
-    const settings = { ...get().settings, ...patch };
+    const settings = sanitizeSettings({ ...get().settings, ...patch });
     try {
       localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
     } catch {
@@ -128,25 +134,35 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   pdf: null,
-  setPdf: (doc) => set({ pdf: doc, currentPage: 0 }),
+  setPdf: (doc) => set({ pdf: doc, currentPage: 0, activeStroke: null }),
   currentPageSize: { width: 612, height: 792 },
   setCurrentPageSize: (size) => {
+    if (!Number.isFinite(size.width) || !Number.isFinite(size.height)) return;
+    if (size.width <= 0 || size.height <= 0) return;
     const prev = get().currentPageSize;
     if (prev.width === size.width && prev.height === size.height) return;
     set({ currentPageSize: size });
   },
   currentPage: 0,
   setCurrentPage: (page) => {
+    if (!Number.isFinite(page)) return;
     const { pdf } = get();
-    const max = pdf ? pdf.pageCount - 1 : 0;
-    set({ currentPage: Math.min(Math.max(page, 0), max) });
+    const max = pdf ? Math.max(0, pdf.pageCount - 1) : 0;
+    const next = Math.min(Math.max(Math.trunc(page), 0), max);
+    if (next === get().currentPage) return;
+    set({ currentPage: next, activeStroke: null });
   },
   zoom: 1,
-  setZoom: (zoom) => set({ zoom: Math.min(4, Math.max(0.25, zoom)), fitMode: 'manual' }),
-  setFitScale: (zoom) => set({ zoom: Math.min(4, Math.max(0.25, zoom)) }),
+  setZoom: (zoom) => {
+    if (!Number.isFinite(zoom)) return;
+    set({ zoom: Math.min(4, Math.max(0.25, zoom)), fitMode: 'manual' });
+  },
+  setFitScale: (zoom) => {
+    if (!Number.isFinite(zoom)) return;
+    set({ zoom: Math.min(4, Math.max(0.25, zoom)) });
+  },
   fitMode: 'fit-width',
   setFitMode: (mode) => set({ fitMode: mode }),
-
   tool: 'pen',
   setTool: (tool) => set({ tool }),
 
@@ -205,12 +221,25 @@ export const useStore = create<AppState>((set, get) => ({
       strokesVersion: get().strokesVersion + 1,
       canUndo: annotations.canUndo(),
       canRedo: annotations.canRedo(),
+      activeStroke: null,
     });
     scheduleAutosave(get);
   },
 
-  tracking: { active: false, fps: 0, handPresent: false, hint: null },
-  setTracking: (patch) => set({ tracking: { ...get().tracking, ...patch } }),
+  tracking: { active: false, fps: 0, handPresent: false, hint: null, backend: 'CPU+GPU' },
+  setTracking: (patch) => {
+    const cur = get().tracking;
+    let changed = false;
+    for (const k of Object.keys(patch) as (keyof TrackingState)[]) {
+      if (patch[k] !== cur[k]) {
+        changed = true;
+        break;
+      }
+    }
+    if (!changed) return;
+    set({ tracking: { ...cur, ...patch } });
+  },
+
   lastGesture: { kind: 'none', seq: 0 },
   noteGesture: (kind) => set({ lastGesture: { kind, seq: get().lastGesture.seq + 1 } }),
 
@@ -243,9 +272,9 @@ export const useStore = create<AppState>((set, get) => ({
   setCheatSheetOpen: (open) => set({ cheatSheetOpen: open }),
   shortcutsOpen: false,
   setShortcutsOpen: (open) => set({ shortcutsOpen: open }),
-
   tutorialPace: 'guided',
   setTutorialPace: (tutorialPace) => set({ tutorialPace }),
+
   handCursor: null,
   airCursor: null,
   activeStroke: null,
@@ -271,6 +300,7 @@ export async function restoreAnnotations(key: string): Promise<void> {
     strokesVersion: useStore.getState().strokesVersion + 1,
     canUndo: false,
     canRedo: false,
+    activeStroke: null,
   });
 }
 

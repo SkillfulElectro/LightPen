@@ -23,7 +23,9 @@
     "help": "Help",
     "exportPdf": "Save annotated PDF",
     "exportPng": "Export page PNG",
-    "cheatSheet": "Gesture cheat sheet"
+    "cheatSheet": "Gesture cheat sheet",
+    "themeDark": "Switch to dark mode",
+    "themeLight": "Switch to light mode"
   },
   "viewer": {
     "dropHint": "Drop a PDF here, or use Open PDF",
@@ -32,7 +34,9 @@
     "encrypted": "This PDF is password-protected and cannot be opened.",
     "corrupt": "This file could not be read as a PDF. It may be corrupt.",
     "tooLarge": "This PDF is too large to open (max 200 MB).",
-    "unknown": "This PDF could not be opened. It may be damaged or unsupported."
+    "unknown": "This PDF could not be opened. It may be damaged or unsupported.",
+    "crashTitle": "Something went wrong while rendering this PDF.",
+    "crashReload": "Reload viewer"
   },
   "camera": {
     "privacy": "All video processing happens on this device. No frames ever leave your device.",
@@ -158,7 +162,12 @@
     "modeTouch": "Touch (like a phone)",
     "modeAirHelp": "Air gestures: pinch thumb and index to write, show an open palm to erase, swipe sideways with an open palm to change pages, hold a fist to pause. No tool switching needed.",
     "modeTouchHelp": "Touch gestures, the way a phone works: your index finger is the cursor, pinch-and-drag draws, a quick pinch is a tap, two fingers scroll and zoom, and a still pinch pauses. Erasing uses the toolbar's eraser, like a phone app.",
-    "zoomSensitivity": "Two-finger zoom sensitivity"
+    "zoomSensitivity": "Two-finger zoom sensitivity",
+    "computeBackend": "Compute backend (CPU + GPU)",
+    "backendHybrid": "Hybrid CPU + GPU (recommended)",
+    "backendGpu": "GPU only (WebGL2)",
+    "backendCpu": "CPU only (WASM)",
+    "backendHelp": "Hybrid uses your GPU for hand inference and CPU cores for frame preprocessing and ink smoothing. Detected: {{hardware}}."
   },
   "shortcuts": {
     "title": "Keyboard shortcuts",
@@ -172,7 +181,8 @@
     "fit": "Fit page",
     "pages": "Previous / next page",
     "camera": "Toggle camera",
-    "help": "This help"
+    "help": "This help",
+    "darkMode": "Toggle dark mode"
   },
   "common": {
     "close": "Close"
