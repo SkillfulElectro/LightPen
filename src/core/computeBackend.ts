@@ -3,6 +3,7 @@
  * Pure logic with defensive DOM/WebGL probes so it works identically in browsers,
  * Tauri WebViews, and headless unit tests.
  */
+
 import type { ActiveComputeBackend, ComputeBackend } from './types';
 
 export interface ComputeCapabilities {
@@ -12,6 +13,8 @@ export interface ComputeCapabilities {
   hasWebGPU: boolean;
   hasOffscreenCanvas: boolean;
   gpuRenderer: string | null;
+  /** True when WebGL is backed by a CPU software rasterizer (e.g. llvmpipe, SwiftShader). */
+  isSoftwareGpu?: boolean;
 }
 
 export interface ExecutionPlan {
@@ -25,6 +28,14 @@ export interface ExecutionPlan {
   inputWidth: number;
   /** Whether to try direct `<video>` textures before 2D canvas readback. */
   preferVideoSource: boolean;
+}
+
+const SOFTWARE_GPU_PATTERN =
+  /llvmpipe|softpipe|swiftshader|lavapipe|software|subzero|basic render driver/i;
+
+/** Detect CPU-emulated WebGL renderers where GPU delegate is much slower than WASM CPU. */
+export function isSoftwareGpuRenderer(renderer: string | null | undefined): boolean {
+  return typeof renderer === 'string' && SOFTWARE_GPU_PATTERN.test(renderer);
 }
 
 /** Probe available CPU and GPU compute capabilities in the current environment. */
@@ -55,7 +66,6 @@ export function probeComputeCapabilities(): ComputeCapabilities {
         powerPreference: 'high-performance',
         antialias: false,
         alpha: false,
-        desynchronized: true,
       };
       const gl2 = probe.getContext('webgl2', attrs) as WebGL2RenderingContext | null;
       const gl = gl2 ?? (probe.getContext('webgl', attrs) as WebGLRenderingContext | null);
@@ -88,42 +98,44 @@ export function probeComputeCapabilities(): ComputeCapabilities {
     hasWebGPU,
     hasOffscreenCanvas,
     gpuRenderer,
+    isSoftwareGpu: isSoftwareGpuRenderer(gpuRenderer),
   };
 }
 
 /**
  * Resolve the optimal CPU/GPU execution plan from user preference and hardware capabilities.
  *
- * In `hybrid` mode (default), GPU accelerates MediaPipe neural hand inference via a
- * high-performance WebGL2 context while multi-core CPU handles camera preprocessing,
- * brightness estimation, One-Euro kinematic smoothing, gesture state machines, and
- * hardware-composited 2D ink rendering.
+ * MediaPipe's palm detector operates at 192x192 and the hand landmarker at 224x224, so
+ * feeding 320–384px frames matches full-frame accuracy while slashing CPU/GPU pixel
+ * copy bandwidth by 2.5x–4x compared to 512px+.
  */
 export function resolveExecutionPlan(
   preferred: ComputeBackend,
   caps: ComputeCapabilities,
   linuxWebKit = false,
 ): ExecutionPlan {
-  const gpuUsable = caps.hasWebGL2 || caps.hasWebGL;
+  const softwareGpu = caps.isSoftwareGpu ?? isSoftwareGpuRenderer(caps.gpuRenderer);
+  const gpuUsable = (caps.hasWebGL2 || caps.hasWebGL) && !softwareGpu;
   const multiCore = caps.cpuCores >= 2;
+  const cpuWidth = caps.cpuCores >= 6 ? 320 : 256;
 
   if (preferred === 'cpu') {
     return {
       delegate: 'CPU',
       label: 'CPU',
       hybrid: false,
-      inputWidth: caps.cpuCores >= 6 ? 480 : 384,
+      inputWidth: cpuWidth,
       preferVideoSource: false,
     };
   }
 
   if (preferred === 'gpu') {
-    if (gpuUsable) {
+    if (caps.hasWebGL2 || caps.hasWebGL) {
       return {
         delegate: 'GPU',
         label: 'GPU',
         hybrid: false,
-        inputWidth: 512,
+        inputWidth: linuxWebKit ? 320 : 384,
         preferVideoSource: !linuxWebKit,
       };
     }
@@ -131,22 +143,22 @@ export function resolveExecutionPlan(
       delegate: 'CPU',
       label: 'CPU',
       hybrid: false,
-      inputWidth: 384,
+      inputWidth: cpuWidth,
       preferVideoSource: false,
     };
   }
 
   // Hybrid CPU + GPU mode (default):
-  // Pair GPU neural inference with multi-core CPU preprocessing & kinematic pipeline.
-  // On Linux WebKitGTK, allow GPU only when WebGL2 is genuinely available, and still use
-  // 2D canvas readback to avoid silent texImage2D(video) black textures (ADR-025).
-  const canUseGpu = linuxWebKit ? caps.hasWebGL2 : gpuUsable;
+  // Never run WebGL2 GPU delegate on a CPU software rasterizer (e.g. Mesa llvmpipe).
+  // On Linux WebKitGTK with a real GPU, keep 320px 2D canvas readback (ADR-025) and rely
+  // on InferenceLoadBalancer's fast GPU -> CPU failover if WebKitGTK EGL readback stalls.
+  const canUseGpu = linuxWebKit ? caps.hasWebGL2 && !softwareGpu : gpuUsable;
   if (canUseGpu) {
     return {
       delegate: 'GPU',
       label: multiCore ? 'CPU+GPU' : 'GPU',
       hybrid: true,
-      inputWidth: multiCore ? 512 : 448,
+      inputWidth: linuxWebKit ? 320 : multiCore ? 384 : 320,
       preferVideoSource: !linuxWebKit,
     };
   }
@@ -155,7 +167,7 @@ export function resolveExecutionPlan(
     delegate: 'CPU',
     label: 'CPU',
     hybrid: true,
-    inputWidth: caps.cpuCores >= 6 ? 480 : 384,
+    inputWidth: cpuWidth,
     preferVideoSource: false,
   };
 }
@@ -171,16 +183,17 @@ export interface LoadBalanceAction {
 
 /**
  * Smooth EMA latency tracker that dynamically tunes resolution and triggers
- * GPU -> CPU failover in hybrid mode without halving FPS at arbitrary thresholds.
+ * GPU -> CPU failover in hybrid mode when GPU stalls below ~25 FPS (>40ms/frame),
+ * avoiding both 16-FPS WebKitGTK GPU stalls and harmonic 30->15 FPS frame skipping.
  */
 export class InferenceLoadBalancer {
   private emaMs = 12;
   private slowStreak = 0;
   private currentWidth: number;
-  private readonly minWidth = 288;
+  private readonly minWidth = 224;
   private readonly maxWidth: number;
 
-  constructor(initialWidth = 512) {
+  constructor(initialWidth = 384) {
     this.currentWidth = Math.max(this.minWidth, initialWidth);
     this.maxWidth = this.currentWidth;
   }
@@ -211,17 +224,19 @@ export class InferenceLoadBalancer {
       };
     }
 
-    this.emaMs = this.emaMs * 0.8 + durationMs * 0.2;
+    this.emaMs = this.emaMs * 0.78 + durationMs * 0.22;
 
-    // Step down input width gracefully if inference approaches 30 FPS budget (> 26ms)
-    if (this.emaMs > 28 && this.currentWidth > this.minWidth) {
+    // Step down input width promptly if inference approaches 30 FPS budget (>24ms)
+    if (this.emaMs > 24 && this.currentWidth > this.minWidth) {
       this.currentWidth = Math.max(this.minWidth, this.currentWidth - 32);
-    } else if (this.emaMs < 14 && this.currentWidth < this.maxWidth) {
+    } else if (this.emaMs < 11 && this.currentWidth < this.maxWidth) {
       this.currentWidth = Math.min(this.maxWidth, this.currentWidth + 16);
     }
 
-    // Track sustained GPU stalls (> 85ms per frame) in hybrid mode for automatic CPU failover
-    if (hybrid && activeDelegate === 'GPU' && this.emaMs > 85) {
+    // Track sustained GPU stalls (>40ms per frame => <25 FPS) in hybrid mode
+    // so WebKitGTK/NVIDIA GL readback stalls fail over to fast multi-core CPU XNNPACK
+    // instead of remaining trapped at ~16 FPS.
+    if (hybrid && activeDelegate === 'GPU' && this.emaMs > 40) {
       this.slowStreak += 1;
     } else {
       this.slowStreak = Math.max(0, this.slowStreak - 1);
@@ -229,8 +244,9 @@ export class InferenceLoadBalancer {
 
     return {
       inputWidth: this.currentWidth,
-      shouldFallbackToCpu: this.slowStreak >= 20,
-      skipNextFrame: durationMs > 60,
+      shouldFallbackToCpu: this.slowStreak >= 12,
+      // Only drop a frame on severe stalls (>95ms) to avoid locking 30 FPS cameras to 15 FPS.
+      skipNextFrame: durationMs > 95,
     };
   }
 }

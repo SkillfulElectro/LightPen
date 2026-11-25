@@ -1,46 +1,47 @@
 /**
- * Global viewport-level Air Cursor Overlay.
- * Morphs visual mouse cursor style dynamically based on the active air touch gesture
- * (hover arrow, interactive pointer hand, pen nib, eraser ring, two-finger scroll,
- * pinch-zoom magnifier, fist grab, and air-tap ripple).
+ * Viewport-level dynamic cursor driven by mid-air hand gestures.
  *
- * Performance: only runs the rAF compositor loop while camera tracking is active,
- * avoiding idle 60Hz CPU wakeups when writing manually.
+ * Updates DOM transforms directly inside a lightweight rAF loop (zero React
+ * re-renders per frame) and caches previous coordinates/style so WebKitGTK
+ * skips redundant style recalculations when stationary.
  */
+
 import { useEffect, useRef } from 'react';
+import type { AirCursorStyle } from '../core/types';
 import { useStore } from '../store/useStore';
 
-function cursorSvgForStyle(style: string, color: string, holdProgress: number): string {
+function cursorSvgForStyle(style: AirCursorStyle, color: string, holdProgress: number): string {
   switch (style) {
     case 'pen':
       return `<svg width="28" height="28" viewBox="0 0 28 28" fill="none">
         <path d="M5 23L9.5 21.5L22 9L19 6L6.5 18.5L5 23Z" fill="${color}" stroke="#ffffff" stroke-width="1.8" stroke-linejoin="round"/>
-        <circle cx="4.5" cy="23.5" r="2.5" fill="${color}" stroke="#ffffff" stroke-width="1.2"/>
+        <circle cx="5" cy="23" r="2.2" fill="${color}" stroke="#ffffff" stroke-width="1.2"/>
       </svg>`;
     case 'eraser':
-      return `<svg width="34" height="34" viewBox="0 0 34 34" fill="none">
-        <circle cx="17" cy="17" r="13" fill="rgba(217,119,6,0.18)" stroke="#d97706" stroke-width="2" stroke-dasharray="4 3"/>
-        <circle cx="17" cy="17" r="2.5" fill="#d97706"/>
+      return `<svg width="32" height="32" viewBox="0 0 32 32" fill="none">
+        <circle cx="16" cy="16" r="12" fill="rgba(217,119,6,0.18)" stroke="#d97706" stroke-width="2" stroke-dasharray="4 3"/>
+        <rect x="11" y="13" width="10" height="6" rx="1.5" fill="#d97706" stroke="#ffffff" stroke-width="1.2"/>
       </svg>`;
     case 'pointer':
-      return `<svg width="26" height="26" viewBox="0 0 26 26" fill="none">
-        <path d="M9 3.5C9 2.67 9.67 2 10.5 2C11.33 2 12 2.67 12 3.5V11H13.5C14.33 11 15 11.67 15 12.5V11.5C15 10.67 15.67 10 16.5 10C17.33 10 18 10.67 18 11.5V13H19.5C20.33 13 21 13.67 21 14.5V18C21 21.31 18.31 24 15 24H12.5C9.8 24 7.7 22.1 6.7 19.6L4.2 14.3C3.85 13.55 4.18 12.66 4.93 12.31C5.68 11.96 6.57 12.29 6.92 13.04L9 16V3.5Z" fill="#2563eb" stroke="#ffffff" stroke-width="1.6" stroke-linejoin="round"/>
+      return `<svg width="28" height="28" viewBox="0 0 28 28" fill="none">
+        <circle cx="14" cy="14" r="10" fill="rgba(37,99,235,0.22)" stroke="#2563eb" stroke-width="2"/>
+        <circle cx="14" cy="14" r="3.5" fill="#2563eb" stroke="#ffffff" stroke-width="1.4"/>
       </svg>`;
     case 'scroll':
       return `<svg width="30" height="30" viewBox="0 0 30 30" fill="none">
         <circle cx="15" cy="15" r="12" fill="rgba(15,23,42,0.82)" stroke="#ffffff" stroke-width="1.6"/>
-        <path d="M15 7L11.5 11H18.5L15 7ZM15 23L11.5 19H18.5L15 23Z" fill="#ffffff"/>
+        <path d="M15 7L11 11H19L15 7ZM15 23L19 19H11L15 23Z" fill="#ffffff"/>
       </svg>`;
     case 'zoom-in':
     case 'zoom-out': {
       const sign =
         style === 'zoom-in'
-          ? '<path d="M13 9V17M9 13H17" stroke="#ffffff" stroke-width="2" stroke-linecap="round"/>'
-          : '<path d="M9 13H17" stroke="#ffffff" stroke-width="2" stroke-linecap="round"/>';
+          ? '<path d="M13 10V16M10 13H16" stroke="#ffffff" stroke-width="2" stroke-linecap="round"/>'
+          : '<path d="M10 13H16" stroke="#ffffff" stroke-width="2" stroke-linecap="round"/>';
       return `<svg width="30" height="30" viewBox="0 0 30 30" fill="none">
-        <circle cx="13" cy="13" r="9" fill="rgba(15,23,42,0.85)" stroke="#ffffff" stroke-width="1.8"/>
-        <path d="M20 20L26 26" stroke="#0f172a" stroke-width="4" stroke-linecap="round"/>
-        <path d="M20 20L26 26" stroke="#ffffff" stroke-width="2" stroke-linecap="round"/>
+        <circle cx="13" cy="13" r="9" fill="rgba(37,99,235,0.88)" stroke="#ffffff" stroke-width="1.8"/>
+        <path d="M19.5 19.5L25 25" stroke="#2563eb" stroke-width="3" stroke-linecap="round"/>
+        <path d="M19.5 19.5L25 25" stroke="#ffffff" stroke-width="1.4" stroke-linecap="round"/>
         ${sign}
       </svg>`;
     }
@@ -82,6 +83,11 @@ export default function AirCursorOverlay() {
 
     let raf = 0;
     let lastSig = '';
+    let lastX = Number.NaN;
+    let lastY = Number.NaN;
+    let lastCssCursor = '';
+    let visible = false;
+
     const tick = () => {
       raf = requestAnimationFrame(tick);
       const curNode = nodeRef.current;
@@ -90,15 +96,32 @@ export default function AirCursorOverlay() {
       if (!curNode || !icon || !label) return;
       const cursor = useStore.getState().airCursor;
       if (!cursor) {
-        if (curNode.style.opacity !== '0') {
+        if (visible) {
           curNode.style.opacity = '0';
           delete document.documentElement.dataset.airCursor;
+          visible = false;
+          lastCssCursor = '';
         }
         return;
       }
-      curNode.style.opacity = '1';
-      curNode.style.transform = `translate3d(${Math.round(cursor.screenX)}px, ${Math.round(cursor.screenY)}px, 0)`;
-      document.documentElement.dataset.airCursor = cursor.cssCursor;
+
+      if (!visible) {
+        curNode.style.opacity = '1';
+        visible = true;
+      }
+
+      const rx = Math.round(cursor.screenX);
+      const ry = Math.round(cursor.screenY);
+      if (rx !== lastX || ry !== lastY) {
+        lastX = rx;
+        lastY = ry;
+        curNode.style.transform = `translate3d(${rx}px, ${ry}px, 0)`;
+      }
+
+      if (cursor.cssCursor !== lastCssCursor) {
+        lastCssCursor = cursor.cssCursor;
+        document.documentElement.dataset.airCursor = cursor.cssCursor;
+      }
 
       const sig = `${cursor.style}:${cursor.color}:${Math.round(cursor.holdProgress * 20)}`;
       if (sig !== lastSig) {
@@ -107,6 +130,7 @@ export default function AirCursorOverlay() {
         label.textContent = cursor.label;
       }
     };
+
     raf = requestAnimationFrame(tick);
     return () => {
       cancelAnimationFrame(raf);

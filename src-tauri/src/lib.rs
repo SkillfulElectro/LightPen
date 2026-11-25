@@ -3,7 +3,7 @@
 //! The app is intentionally thin on the Rust side: the frontend does PDF
 //! rendering, annotation and hand tracking (WASM). The Rust layer only
 //! provides the native window, native menus, file dialogs, the annotation
-//! sidecar store and OS "open with" support.
+//! sidecar store, diagnostic logging and OS "open with" support.
 //!
 //! Security notes:
 //! - no `unsafe` code (enforced by `#![forbid(unsafe_code)]`),
@@ -17,6 +17,11 @@
 // build. Warnings are printed; `cargo clippy -D warnings` in CI is the gate.
 
 use serde::Serialize;
+use std::fs::{self, OpenOptions};
+use std::io::Write;
+use std::path::{Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
+use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::webview::{PermissionKind, PermissionResponse};
 
 /// Maximum size accepted through the "open with" path. Larger files must be
@@ -24,11 +29,202 @@ use tauri::webview::{PermissionKind, PermissionResponse};
 /// Documented in `docs/DECISIONS.md` (ADR-016).
 const MAX_OPEN_WITH_BYTES: u64 = 32 * 1024 * 1024;
 
+/// Maximum size of the rolling diagnostic log file before rotation.
+const MAX_LOG_FILE_BYTES: u64 = 2 * 1024 * 1024;
+
+/// Default and maximum tail size returned by `read_recent_logs`.
+const DEFAULT_READ_LOG_BYTES: usize = 128 * 1024;
+const MAX_READ_LOG_BYTES: usize = 512 * 1024;
+
+static LOG_FILE_PATH: OnceLock<PathBuf> = OnceLock::new();
+static LOG_LOCK: Mutex<()> = Mutex::new(());
+
 /// A PDF handed to the app by the OS.
 #[derive(Serialize)]
 pub struct OpenFile {
     pub name: String,
     pub bytes: Vec<u8>,
+}
+
+fn non_empty_env(key: &str) -> Option<String> {
+    std::env::var(key).ok().filter(|v| !v.is_empty())
+}
+
+fn default_log_path() -> PathBuf {
+    if let Some(xdg) = non_empty_env("XDG_DATA_HOME") {
+        return PathBuf::from(xdg)
+            .join("app.lightpen.desktop")
+            .join("logs")
+            .join("lightpen.log");
+    }
+    if let Some(appdata) = non_empty_env("APPDATA") {
+        return PathBuf::from(appdata)
+            .join("app.lightpen.desktop")
+            .join("logs")
+            .join("lightpen.log");
+    }
+    if let Some(home) = non_empty_env("HOME") {
+        #[cfg(target_os = "macos")]
+        return PathBuf::from(home)
+            .join("Library")
+            .join("Application Support")
+            .join("app.lightpen.desktop")
+            .join("logs")
+            .join("lightpen.log");
+        #[cfg(not(target_os = "macos"))]
+        return PathBuf::from(home)
+            .join(".local")
+            .join("share")
+            .join("app.lightpen.desktop")
+            .join("logs")
+            .join("lightpen.log");
+    }
+    std::env::temp_dir().join("lightpen.log")
+}
+
+fn sanitize_log_level(level: &str) -> &'static str {
+    match level.to_ascii_lowercase().as_str() {
+        "debug" => "DEBUG",
+        "warn" | "warning" => "WARN",
+        "error" => "ERROR",
+        _ => "INFO",
+    }
+}
+
+fn format_log_line(
+    unix_ms: u128,
+    level: &str,
+    scope: &str,
+    message: &str,
+    context: Option<&str>,
+) -> String {
+    let lvl = sanitize_log_level(level);
+    match context.filter(|c| !c.is_empty()) {
+        Some(ctx) => format!("[{unix_ms}] [{lvl}] [{scope}] {message} {ctx}"),
+        None => format!("[{unix_ms}] [{lvl}] [{scope}] {message}"),
+    }
+}
+
+fn append_log_file(path: &Path, line: &str) {
+    let _guard = match LOG_LOCK.lock() {
+        Ok(g) => g,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    if let Some(parent) = path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    if fs::metadata(path).is_ok_and(|m| m.len() > MAX_LOG_FILE_BYTES) {
+        let rotated = path.with_extension("log.old");
+        let _ = fs::rename(path, rotated);
+    }
+    if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(path) {
+        let _ = writeln!(file, "{line}");
+    }
+}
+
+fn read_tail_bytes(path: &Path, max_bytes: usize) -> Result<String, String> {
+    let bytes = fs::read(path).map_err(|e| format!("cannot read log file: {e}"))?;
+    let start = bytes.len().saturating_sub(max_bytes);
+    Ok(String::from_utf8_lossy(&bytes[start..]).into_owned())
+}
+
+fn log_line(level: &str, scope: &str, message: &str, context: Option<&str>) {
+    let unix_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0);
+    let line = format_log_line(unix_ms, level, scope, message, context);
+    eprintln!("{line}");
+    let path = LOG_FILE_PATH.get_or_init(default_log_path);
+    append_log_file(path, &line);
+}
+
+fn install_panic_hook() {
+    let previous = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let location = info
+            .location()
+            .map(|l| format!("{}:{}:{}", l.file(), l.line(), l.column()))
+            .unwrap_or_else(|| "unknown".into());
+        let payload = info
+            .payload()
+            .downcast_ref::<&str>()
+            .copied()
+            .or_else(|| info.payload().downcast_ref::<String>().map(String::as_str))
+            .unwrap_or("non-string panic payload");
+        let ctx = format!("location={location}");
+        log_line("error", "rust-panic", payload, Some(&ctx));
+        previous(info);
+    }));
+}
+
+#[cfg(target_os = "linux")]
+fn detect_nvidia_driver() -> Option<String> {
+    if let Ok(text) = fs::read_to_string("/proc/driver/nvidia/version") {
+        let first = text
+            .lines()
+            .next()
+            .map(str::trim)
+            .filter(|l| !l.is_empty())
+            .unwrap_or("nvidia");
+        return Some(first.to_string());
+    }
+    if Path::new("/sys/module/nvidia").exists() {
+        return Some("nvidia-module".into());
+    }
+    None
+}
+
+/// Apply Linux WebKitGTK stability defaults before GTK/WebKit initializes.
+///
+/// WebKitGTK 2.42+ DMA-BUF compositing on NVIDIA proprietary drivers often
+/// causes ~15 FPS stalls or `WebKitWebProcess` crashes during rapid canvas
+/// updates. Disabling DMA-BUF on detected NVIDIA hosts avoids those crashes
+/// while keeping hardware compositing active; users can opt out with
+/// `LIGHTPEN_KEEP_DMABUF=1`.
+#[cfg(target_os = "linux")]
+fn configure_linux_webkit_env() {
+    let nvidia = detect_nvidia_driver();
+    let dmabuf_before = non_empty_env("WEBKIT_DISABLE_DMABUF_RENDERER");
+    let keep_dmabuf = non_empty_env("LIGHTPEN_KEEP_DMABUF").as_deref() == Some("1");
+
+    if nvidia.is_some() && dmabuf_before.is_none() && !keep_dmabuf {
+        std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+        log_line(
+            "info",
+            "linux-webkit",
+            "NVIDIA GPU detected; set WEBKIT_DISABLE_DMABUF_RENDERER=1 (set LIGHTPEN_KEEP_DMABUF=1 to override)",
+            None,
+        );
+    }
+
+    let session = non_empty_env("XDG_SESSION_TYPE").unwrap_or_else(|| "unknown".into());
+    let wayland = non_empty_env("WAYLAND_DISPLAY").is_some();
+    let x11 = non_empty_env("DISPLAY").is_some();
+    let appimage = non_empty_env("APPIMAGE").is_some();
+    let dmabuf_now =
+        non_empty_env("WEBKIT_DISABLE_DMABUF_RENDERER").unwrap_or_else(|| "unset".into());
+    let compositing =
+        non_empty_env("WEBKIT_DISABLE_COMPOSITING_MODE").unwrap_or_else(|| "unset".into());
+    let nvidia_str = nvidia.as_deref().unwrap_or("none");
+    let ctx = format!(
+        "session={session} wayland={wayland} x11={x11} appimage={appimage} dmabuf_disabled={dmabuf_now} compositing_disabled={compositing} nvidia={nvidia_str}"
+    );
+    log_line("info", "linux-env", "Linux graphics/session environment", Some(&ctx));
+}
+
+fn log_startup_banner() {
+    let threads = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(0);
+    let path = LOG_FILE_PATH.get_or_init(default_log_path);
+    let ctx = format!(
+        "version={} os={} arch={} cpu_threads={} log_file={}",
+        env!("CARGO_PKG_VERSION"),
+        std::env::consts::OS,
+        std::env::consts::ARCH,
+        threads,
+        path.display()
+    );
+    log_line("info", "startup", "LightPen starting", Some(&ctx));
 }
 
 /// Decide a webview permission request.
@@ -43,12 +239,8 @@ pub struct OpenFile {
 /// denial; only the embedder (this code) can answer it.
 ///
 /// Only the camera is allowed, because that is the only capture the app
-/// ever requests: the frontend calls `getUserMedia` with `audio: false`
-/// and only after the user presses “Allow camera” / “Start camera”, so
-/// that click is the consent. Everything else — microphone, geolocation,
-/// notifications, … — returns `Default`, leaving the webview's own
-/// deny-by-default behaviour untouched. macOS still goes through the
-/// system TCC prompt (`NSCameraUsageDescription` in `Info.plist`) and
+/// uses; microphone, geolocation and notifications stay on the webview
+/// default (denied). macOS/iOS still enforce the OS prompt (`Info.plist`) and
 /// Android still goes through the runtime permission (see
 /// `scripts/patch-android-permissions.mjs`); this handler only removes
 /// the extra webview-level veto. Documented in ADR-023.
@@ -68,6 +260,30 @@ fn app_version() -> &'static str {
     env!("CARGO_PKG_VERSION")
 }
 
+/// Receive structured diagnostic logs from the frontend and write them to stderr + log file.
+#[tauri::command]
+fn log_event(level: String, scope: String, message: String, context: Option<String>) {
+    log_line(&level, &scope, &message, context.as_deref());
+}
+
+/// Return the persistent diagnostic log file path so users can share bug reports easily.
+#[tauri::command]
+fn get_log_path() -> Option<String> {
+    let path = LOG_FILE_PATH.get_or_init(default_log_path);
+    Some(path.to_string_lossy().into_owned())
+}
+
+/// Read the tail of the persistent diagnostic log file.
+#[tauri::command]
+fn read_recent_logs(max_bytes: Option<usize>) -> Result<String, String> {
+    let path = LOG_FILE_PATH.get_or_init(default_log_path);
+    if !path.exists() {
+        return Ok(String::new());
+    }
+    let limit = max_bytes.unwrap_or(DEFAULT_READ_LOG_BYTES).clamp(1024, MAX_READ_LOG_BYTES);
+    read_tail_bytes(path, limit)
+}
+
 /// Read a PDF passed by the OS ("open with" / double-click on a file).
 /// Returns `None` when the path is not a PDF or is too large.
 #[tauri::command]
@@ -76,7 +292,7 @@ fn read_open_file(path: String) -> Result<Option<OpenFile>, String> {
     if !lower.ends_with(".pdf") {
         return Ok(None);
     }
-    let meta = std::fs::metadata(&path).map_err(|e| format!("cannot read file: {e}"))?;
+    let meta = fs::metadata(&path).map_err(|e| format!("cannot read file: {e}"))?;
     if !meta.is_file() {
         return Ok(None);
     }
@@ -85,8 +301,8 @@ fn read_open_file(path: String) -> Result<Option<OpenFile>, String> {
             "This PDF is too large to open from the file association. Use Open PDF instead.".into(),
         );
     }
-    let bytes = std::fs::read(&path).map_err(|e| format!("cannot read file: {e}"))?;
-    let name = std::path::Path::new(&path)
+    let bytes = fs::read(&path).map_err(|e| format!("cannot read file: {e}"))?;
+    let name = Path::new(&path)
         .file_name()
         .and_then(|n| n.to_str())
         .unwrap_or("document.pdf")
@@ -202,6 +418,11 @@ fn emit_cli_file(app: &tauri::AppHandle) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    install_panic_hook();
+    log_startup_banner();
+    #[cfg(target_os = "linux")]
+    configure_linux_webkit_env();
+
     let mut builder = tauri::Builder::default()
         // Without this, WebKitGTK denies the camera unconditionally on
         // Linux (see `permission_response`). Applies to every webview.
@@ -209,7 +430,13 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
-        .invoke_handler(tauri::generate_handler![app_version, read_open_file]);
+        .invoke_handler(tauri::generate_handler![
+            app_version,
+            read_open_file,
+            log_event,
+            get_log_path,
+            read_recent_logs
+        ]);
 
     #[cfg(desktop)]
     {
@@ -297,5 +524,29 @@ mod tests {
                 "{kind:?} must stay on the webview default"
             );
         }
+    }
+
+    #[test]
+    fn formats_diagnostic_log_lines_cleanly() {
+        assert_eq!(sanitize_log_level("warn"), "WARN");
+        assert_eq!(sanitize_log_level("ERROR"), "ERROR");
+        assert_eq!(sanitize_log_level("unknown"), "INFO");
+        assert_eq!(
+            format_log_line(42, "warn", "perf", "Slow frame", Some("fps=16")),
+            "[42] [WARN] [perf] Slow frame fps=16"
+        );
+        assert_eq!(
+            format_log_line(42, "info", "startup", "Boot", None),
+            "[42] [INFO] [startup] Boot"
+        );
+    }
+
+    #[test]
+    fn reads_tail_of_log_file() {
+        let path = std::env::temp_dir().join("lightpen-tail-test.log");
+        let _ = fs::write(&path, "0123456789abcdef");
+        let tail = read_tail_bytes(&path, 6).unwrap();
+        let _ = fs::remove_file(&path);
+        assert_eq!(tail, "abcdef");
     }
 }

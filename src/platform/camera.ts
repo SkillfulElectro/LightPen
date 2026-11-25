@@ -1,34 +1,15 @@
 /**
- * Camera access via getUserMedia. All frames stay on-device.
- *
- * Permission is a native concern, not a browser prompt, in the packaged
- * app: `src-tauri/src/lib.rs` answers the webview's permission request
- * (`Builder::on_permission_request`, camera-only). Without that handler
- * WebKitGTK denied every request on Linux — the CachyOS “camera
- * permission is not granted” report — and no retry or looser constraint
- * in this file could have fixed it. A `denied` result here therefore
- * means a genuine system-level refusal (OS settings, portal, device
- * node permissions), which is what `camera.denied` now tells the user
- * to check.
+ * Camera access and frame loop.
+ * Uses getUserMedia (works in WebView on every Tauri target and in browsers).
+ * Frames stay in memory — never recorded, saved, or sent anywhere.
  */
 
-export type CameraErrorKind =
-  | 'denied'
-  | 'not-found'
-  | 'in-use'
-  | 'unsupported'
-  /**
-   * The webview has a camera but no way to read it. On Linux this is the
-   * AppImage's missing GStreamer capture plugins: WebKitGTK logs "Video capture
-   * was requested but no device was found amongst 0 devices" and rejects with
-   * OverconstrainedError even though the device exists. It needs its own
-   * message, because "check that one is connected" sends people to the wrong
-   * place.
-   */
-  | 'no-capture'
-  | 'unknown';
+import { logInfo, logWarn } from './logger';
 
-/** i18n key for each camera failure, so the UI never shows a raw key. */
+export type CameraErrorKind =
+  'denied' | 'not-found' | 'in-use' | 'unsupported' | 'no-capture' | 'unknown';
+
+/** i18n key (under `camera.`) for every CameraErrorKind. */
 export const CAMERA_ERROR_MESSAGE_KEY: Record<CameraErrorKind, string> = {
   denied: 'camera.denied',
   'not-found': 'camera.notFound',
@@ -38,14 +19,19 @@ export const CAMERA_ERROR_MESSAGE_KEY: Record<CameraErrorKind, string> = {
   unknown: 'camera.unsupported',
 };
 
-const isLinuxDesktop = (): boolean =>
-  typeof navigator !== 'undefined' && /Linux/i.test(navigator.userAgent);
+function isLinuxDesktop(): boolean {
+  return (
+    typeof navigator !== 'undefined' &&
+    /Linux/i.test(navigator.userAgent) &&
+    !/Android/i.test(navigator.userAgent)
+  );
+}
 
 /**
- * `OverconstrainedError` means "no device matches these constraints". Browsers
- * raise it for a genuinely missing camera *and* for a webview that cannot
- * capture at all, so the two are told apart by enumeration: on Linux, if no
- * videoinput is listed while the OS almost certainly has one, the webview is
+ * True if the webview exposes at least one video input device.
+ * On Linux AppImages built without GStreamer capture plugins, WebKitGTK returns
+ * an empty list here even when `/dev/video0` exists — so when `getUserMedia`
+ * also fails on a Linux laptop that almost certainly has one, the webview is
  * missing its capture stack rather than the user missing a camera.
  */
 export async function hasAnyVideoInput(): Promise<boolean> {
@@ -108,47 +94,75 @@ function mapError(err: unknown): CameraError {
   return new CameraError('unknown', 'Could not start the camera.');
 }
 
+function logStreamSettings(stream: MediaStream, fallback: boolean): void {
+  const track = stream.getVideoTracks?.()[0];
+  const s = track?.getSettings?.();
+  logInfo(
+    'camera',
+    fallback ? 'Camera stream started (unconstrained fallback)' : 'Camera stream started',
+    {
+      width: s?.width,
+      height: s?.height,
+      frameRate: s?.frameRate,
+      facingMode: s?.facingMode,
+    },
+  );
+}
+
 /**
  * Start a camera stream. Caller owns the stream and must stop it.
  *
- * Tries the preferred constraints, then a bare `{ video: true }` (some webviews
- * refuse the ideal width/height or the facingMode), and only then decides the
- * failure was real — with a better message on Linux, where an AppImage without
- * GStreamer plugins reports "no device" for a camera that exists.
+ * Uses soft `ideal` constraints (no hard `min` frameRate) so 30 FPS Linux
+ * PipeWire/GStreamer webcams are not rejected with OverconstrainedError and
+ * forced into unconstrained 1080p@15fps YUYV fallback modes.
  */
 export async function startCamera(deviceId: string | null): Promise<MediaStream> {
   if (!isCameraSupported()) {
     throw new CameraError('unsupported', 'Camera is not supported in this browser.');
   }
   try {
-    return await navigator.mediaDevices.getUserMedia({
+    const stream = await navigator.mediaDevices.getUserMedia({
       video: deviceId
         ? {
             deviceId: { exact: deviceId },
             width: { ideal: 640 },
             height: { ideal: 480 },
-            frameRate: { ideal: 60, min: 24 },
+            frameRate: { ideal: 60 },
           }
         : {
             facingMode: 'user',
             width: { ideal: 640 },
             height: { ideal: 480 },
-            frameRate: { ideal: 60, min: 24 },
+            frameRate: { ideal: 60 },
           },
       audio: false,
     });
+    logStreamSettings(stream, false);
+    return stream;
   } catch (first) {
     // A denied permission will not become allowed by asking more loosely.
     const mapped = mapError(first);
-    if (mapped.kind === 'denied' || mapped.kind === 'in-use') throw mapped;
+    if (mapped.kind === 'denied' || mapped.kind === 'in-use') {
+      logWarn('camera', 'Camera open failed', {
+        kind: mapped.kind,
+        errorName: (first as { name?: string })?.name,
+      });
+      throw mapped;
+    }
+    logWarn('camera', 'Preferred camera constraints rejected; retrying unconstrained', {
+      errorName: (first as { name?: string })?.name,
+    });
     try {
-      return await startCameraUnconstrained();
+      const stream = await startCameraUnconstrained();
+      logStreamSettings(stream, true);
+      return stream;
     } catch {
       // Only OverconstrainedError is ambiguous: the spec uses it both for
       // "no camera matches" and for "this webview has no capture pipeline at
       // all". NotFoundError already means there is no device.
       const ambiguous = (first as { name?: string }).name === 'OverconstrainedError';
       if (ambiguous && isLinuxDesktop() && !(await hasAnyVideoInput())) {
+        logWarn('camera', 'No GStreamer capture stack available in Linux build');
         throw new CameraError(
           'no-capture',
           'This build cannot read from the camera (missing GStreamer capture plugins).',
@@ -265,13 +279,30 @@ export function hasLiveFrames(video: HTMLVideoElement): boolean {
  * starting MediaPipe detection, avoiding premature 0x0 frame failures.
  */
 export function waitForVideoFrames(video: HTMLVideoElement, timeoutMs = 4000): Promise<boolean> {
-  if (hasLiveFrames(video)) return Promise.resolve(true);
+  const startedAt = typeof performance !== 'undefined' ? performance.now() : 0;
+  if (hasLiveFrames(video)) {
+    logInfo('camera', 'Video frames ready immediately', {
+      videoWidth: video.videoWidth,
+      videoHeight: video.videoHeight,
+      readyState: video.readyState,
+    });
+    return Promise.resolve(true);
+  }
   return new Promise((resolve) => {
     let settled = false;
     const finish = (ok: boolean) => {
       if (settled) return;
       settled = true;
       cleanup();
+      const waitedMs =
+        typeof performance !== 'undefined' ? Math.round(performance.now() - startedAt) : undefined;
+      logInfo('camera', ok ? 'First video frame decoded' : 'Timed out waiting for video frames', {
+        ok,
+        waitedMs,
+        videoWidth: video.videoWidth,
+        videoHeight: video.videoHeight,
+        readyState: video.readyState,
+      });
       resolve(ok);
     };
     const check = () => {

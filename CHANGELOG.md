@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.10] - 2026-11-25
+
+### Fixed
+
+- **16 FPS tracking bottleneck on Linux/NVIDIA & WebKitGTK.** Removed the hard
+  `min: 24` camera frame-rate constraint that could force Linux PipeWire/v4l2
+  webcams into unconstrained 1080p@15fps YUYV fallback modes, tuned inference
+  snapshot width to 320–384px (matching MediaPipe's 192/224px input tensors)
+  with cached 2D contexts, rejected CPU software WebGL renderers (e.g.
+  `llvmpipe`, `SwiftShader`) in hybrid mode, lowered hybrid GPU→CPU stall
+  failover from 85ms to 40ms so 16 FPS WebKitGTK GL stalls auto-recover to
+  multi-core CPU WASM SIMD, raised emergency frame-skip threshold to 95ms to
+  stop 30→15 FPS harmonic halving, and replaced 60Hz full-page ink/cursor
+  clears with O(1) incremental stroke rendering and dirty-rect cursor updates.
+- **Crashes while writing.** Prevented WASM Use-After-Free crashes by guarding
+  closed `HandLandmarker` instances and pausing detection during delegate
+  failover/switching, removed `desynchronized: true` on WebKitGTK canvases,
+  tightened Linux WebKitGTK canvas backing-store budgets, and automatically set
+  `WEBKIT_DISABLE_DMABUF_RENDERER=1` on detected NVIDIA Linux hosts
+  (overridable via `LIGHTPEN_KEEP_DMABUF=1`).
+
+### Added
+
+- **Structured diagnostic logging (terminal, log file, and in-app export).**
+  Added native Rust stderr + rolling `lightpen.log` file logging with panic
+  hooks and Linux graphics/NVIDIA environment diagnostics, wired frontend
+  startup, camera, MediaPipe, error-boundary, global error, and 5-second FPS /
+  inference telemetry logs into the native log stream, and added Copy / Save
+  diagnostic log actions in Settings and crash recovery.
+
 ## [0.1.9] - 2026-11-24
 
 ### Fixed
@@ -179,7 +209,8 @@ First working version.
 - **Privacy** — on-device processing only, camera stops on pause/hide, visible
   live indicator, no telemetry, strict CSP, least-privilege Tauri capabilities.
 
-[Unreleased]: https://github.com/SkillfulElectro/LightPen/compare/v0.1.9...HEAD
+[Unreleased]: https://github.com/SkillfulElectro/LightPen/compare/v0.1.10...HEAD
+[0.1.10]: https://github.com/SkillfulElectro/LightPen/compare/v0.1.9...v0.1.10
 [0.1.9]: https://github.com/SkillfulElectro/LightPen/compare/v0.1.8...v0.1.9
 [0.1.8]: https://github.com/SkillfulElectro/LightPen/releases/tag/v0.1.8
 [0.1.0]: https://github.com/SkillfulElectro/LightPen/releases/tag/v0.1.0
