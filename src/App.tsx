@@ -272,7 +272,11 @@ export default function App() {
       />
       <main className="app-main">
         <section className="viewer-section" aria-label="PDF viewer">
-          <ErrorBoundary title={t('viewer.crashTitle')} reloadLabel={t('viewer.crashReload')}>
+          <ErrorBoundary
+            title={t('viewer.crashTitle')}
+            reloadLabel={t('viewer.crashReload')}
+            saveLogLabel={t('settings.saveLog')}
+          >
             <PdfViewer pdfBytes={pdfBytes} pdfName={pdfName} onPdfLoaded={onPdfLoaded} />
           </ErrorBoundary>
         </section>

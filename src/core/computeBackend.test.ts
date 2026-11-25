@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { addPoint, createStroke, MAX_STROKE_POINTS } from './annotations';
 import {
   InferenceLoadBalancer,
+  isSoftwareGpuRenderer,
   resolveExecutionPlan,
   type ComputeCapabilities,
 } from './computeBackend';
@@ -50,9 +51,47 @@ describe('resolveExecutionPlan', () => {
     expect(plan.label).toBe('CPU');
   });
 
-  it('honors explicit cpu and gpu preferences', () => {
-    expect(resolveExecutionPlan('cpu', FULL_CAPS, false).delegate).toBe('CPU');
-    expect(resolveExecutionPlan('gpu', FULL_CAPS, false).label).toBe('GPU');
+  it('rejects software WebGL renderers (llvmpipe / SwiftShader) in hybrid mode', () => {
+    expect(isSoftwareGpuRenderer('llvmpipe (LLVM 15.0.7, 256 bits)')).toBe(true);
+    expect(isSoftwareGpuRenderer('Google SwiftShader')).toBe(true);
+    expect(isSoftwareGpuRenderer('NVIDIA GeForce RTX 4060/PCIe/SSE2')).toBe(false);
+    const plan = resolveExecutionPlan(
+      'hybrid',
+      { ...FULL_CAPS, gpuRenderer: 'llvmpipe (LLVM 15.0.7, 256 bits)' },
+      true,
+    );
+    expect(plan.delegate).toBe('CPU');
+    expect(plan.label).toBe('CPU');
+  });
+
+  it('honors explicit cpu and gpu preferences across hardware profiles', () => {
+    expect(resolveExecutionPlan('cpu', FULL_CAPS, false)).toMatchObject({
+      delegate: 'CPU',
+      inputWidth: 320,
+    });
+    expect(resolveExecutionPlan('cpu', CPU_ONLY_CAPS, false)).toMatchObject({
+      delegate: 'CPU',
+      inputWidth: 256,
+    });
+    expect(resolveExecutionPlan('gpu', FULL_CAPS, false)).toMatchObject({
+      label: 'GPU',
+      inputWidth: 384,
+      preferVideoSource: true,
+    });
+    expect(resolveExecutionPlan('gpu', FULL_CAPS, true)).toMatchObject({
+      label: 'GPU',
+      inputWidth: 320,
+      preferVideoSource: false,
+    });
+    expect(resolveExecutionPlan('gpu', CPU_ONLY_CAPS, false)).toMatchObject({
+      delegate: 'CPU',
+      label: 'CPU',
+    });
+    expect(resolveExecutionPlan('hybrid', { ...FULL_CAPS, cpuCores: 1 }, false)).toMatchObject({
+      delegate: 'GPU',
+      label: 'GPU',
+      inputWidth: 320,
+    });
   });
 });
 
@@ -81,6 +120,28 @@ describe('InferenceLoadBalancer', () => {
       }
     }
     expect(triggered).toBe(true);
+  });
+
+  it('fails over to CPU on sustained ~16 FPS (62ms) GPU stalls without 30->15 FPS frame skipping', () => {
+    const lb = new InferenceLoadBalancer(320);
+    let failover = false;
+    let skippedAt62ms = false;
+    for (let i = 0; i < 20; i++) {
+      const action = lb.record(62, 'GPU', true);
+      if (action.skipNextFrame) skippedAt62ms = true;
+      if (action.shouldFallbackToCpu) {
+        failover = true;
+        break;
+      }
+    }
+    expect(skippedAt62ms).toBe(false);
+    expect(failover).toBe(true);
+    expect(lb.averageInferenceMs).toBeGreaterThan(40);
+    expect(lb.record(Number.NaN, 'GPU', true).shouldFallbackToCpu).toBe(false);
+    expect(lb.record(120, 'CPU', true).skipNextFrame).toBe(true);
+    lb.reset(384);
+    expect(lb.inputWidth).toBe(384);
+    expect(lb.averageInferenceMs).toBe(12);
   });
 });
 

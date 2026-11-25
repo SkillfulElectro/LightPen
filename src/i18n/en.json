@@ -167,7 +167,13 @@
     "backendHybrid": "Hybrid CPU + GPU (recommended)",
     "backendGpu": "GPU only (WebGL2)",
     "backendCpu": "CPU only (WASM)",
-    "backendHelp": "Hybrid uses your GPU for hand inference and CPU cores for frame preprocessing and ink smoothing. Detected: {{hardware}}."
+    "backendHelp": "Hybrid uses your GPU for hand inference and CPU cores for frame preprocessing and ink smoothing. Detected: {{hardware}}.",
+    "diagnostics": "Diagnostics & logs",
+    "diagnosticsHelp": "Share diagnostic logs with a bug report to help troubleshoot FPS or crashes. No camera video or PDF content is ever logged.",
+    "diagnosticsPath": "Log file: {{path}}",
+    "copyLog": "Copy diagnostic log",
+    "copiedLog": "Copied log",
+    "saveLog": "Save log file"
   },
   "shortcuts": {
     "title": "Keyboard shortcuts",

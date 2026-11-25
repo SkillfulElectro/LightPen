@@ -1,5 +1,5 @@
 /** Modal dialogs: camera permission rationale, settings, cheat sheet, shortcuts. */
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   pinchThresholdToSensitivity,
@@ -8,7 +8,9 @@ import {
 } from '../core/settings';
 import { LANGUAGES, initI18n } from '../i18n';
 import type { ComputeBackend, GestureMode } from '../core/types';
+import { getFullDiagnosticReport, getNativeLogPath } from '../platform/logger';
 import { getComputeCapabilities } from '../platform/mediapipe';
+import { saveBytesAs } from '../platform/tauri';
 import { useStore } from '../store/useStore';
 import { CloseIcon } from './Icons';
 import { PauseIllustration } from './illustrations';
@@ -102,6 +104,21 @@ export function SettingsDialog() {
   const update = useStore((s) => s.updateSettings);
   const reset = useStore((s) => s.resetSettings);
   const requestCalibration = useStore((s) => s.requestCalibration);
+  const [logPath, setLogPath] = useState<string | null>(null);
+  const [copiedLog, setCopiedLog] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    setCopiedLog(false);
+    void getNativeLogPath().then((p) => {
+      if (!cancelled) setLogPath(p);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [open]);
+
   if (!open) return null;
 
   const caps = getComputeCapabilities();
@@ -342,6 +359,47 @@ export function SettingsDialog() {
             disabled={!settings.calibration}
           >
             {t('settings.clearCalibration')}
+          </button>
+        </div>
+      </fieldset>
+
+      <fieldset className="settings-section">
+        <legend>{t('settings.diagnostics')}</legend>
+        <p className="settings-help">{t('settings.diagnosticsHelp')}</p>
+        {logPath && (
+          <p className="camera-diagnostic">{t('settings.diagnosticsPath', { path: logPath })}</p>
+        )}
+        <div className="settings-row">
+          <button
+            type="button"
+            onClick={() => {
+              void getFullDiagnosticReport({ Version: '0.1.10', Hardware: hwSummary })
+                .then(async (report) => {
+                  if (navigator.clipboard?.writeText) {
+                    await navigator.clipboard.writeText(report);
+                    setCopiedLog(true);
+                  }
+                })
+                .catch(() => {
+                  // Clipboard unavailable — user can still save the file.
+                });
+            }}
+          >
+            {copiedLog ? t('settings.copiedLog') : t('settings.copyLog')}
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              void getFullDiagnosticReport({ Version: '0.1.10', Hardware: hwSummary })
+                .then((report) =>
+                  saveBytesAs('lightpen-diagnostics.log', new TextEncoder().encode(report)),
+                )
+                .catch(() => {
+                  // Save cancelled or unavailable.
+                });
+            }}
+          >
+            {t('settings.saveLog')}
           </button>
         </div>
       </fieldset>

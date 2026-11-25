@@ -2,11 +2,14 @@
  * pdf.js document handling: loading, page sizes, serialized render queue with
  * awaited cancellation, safe canvas memory budgets, and canvas cleanup.
  */
+
 import { useCallback, useEffect, useRef, useState } from 'react';
 import * as pdfjs from 'pdfjs-dist';
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import { computeSafeCanvasSize } from '../core/coords';
 import type { PageSize } from '../core/types';
+import { logError, logInfo } from '../platform/logger';
+import { isLinuxWebKit } from '../platform/mediapipe';
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
 
@@ -16,6 +19,7 @@ pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
  * worker cannot be imported, so tests pass `pdfjs-dist/legacy/build/pdf.mjs`.
  */
 export type PdfJsApi = Pick<typeof pdfjs, 'getDocument'>;
+
 type PdfModule = typeof pdfjs & { default?: typeof pdfjs };
 
 /** Resolve a dynamically imported pdf.js module (ESM namespace or default). */
@@ -66,6 +70,7 @@ export async function loadPdf(bytes: Uint8Array): Promise<LoadedPdf> {
     err.kind = 'too-large';
     throw err;
   }
+  const t0 = typeof performance !== 'undefined' ? performance.now() : 0;
   const doc = await api().getDocument({ data: bytes.slice(), isEvalSupported: false }).promise;
   // Page sizes are read lazily (getPageGeometry) so large documents open fast;
   // only the first page is probed here, as a sensible initial default.
@@ -82,6 +87,11 @@ export async function loadPdf(bytes: Uint8Array): Promise<LoadedPdf> {
   } catch {
     // Fall back to Letter; the viewer reports real page errors.
   }
+  logInfo('pdf', 'Document loaded', {
+    pageCount: doc.numPages,
+    bytes: bytes.byteLength,
+    loadMs: typeof performance !== 'undefined' ? Math.round(performance.now() - t0) : undefined,
+  });
   return { doc, pageCount: doc.numPages, pageSizes };
 }
 
@@ -116,10 +126,12 @@ export async function getPageGeometry(
 }
 
 /**
- * Render a page into a canvas with a strictly serialized render queue:
- * starting a new render cancels any active pdf.js RenderTask and *awaits* its
- * cancellation before reusing the canvas, preventing the fatal pdf.js crash
- * "Cannot use the same canvas during multiple render() operations".
+ * Serialized page renderer hook.
+ *
+ * Cancelling an active pdf.js render task does NOT synchronously free the canvas;
+ * awaiting the cancelled task's promise before starting the next render prevents
+ * pdf.js from throwing "Cannot use the same canvas during multiple render() operations"
+ * or crashing the WebView while zooming/panning/writing.
  */
 export function usePageRenderer(doc: pdfjs.PDFDocumentProxy | null) {
   const renderTaskRef = useRef<pdfjs.RenderTask | null>(null);
@@ -153,6 +165,7 @@ export function usePageRenderer(doc: pdfjs.PDFDocumentProxy | null) {
       if (gen !== renderGenRef.current) return;
 
       setRendering(true);
+      const t0 = typeof performance !== 'undefined' ? performance.now() : 0;
       try {
         const page = await doc.getPage(pageIndex + 1);
         if (gen !== renderGenRef.current) return;
@@ -160,10 +173,15 @@ export function usePageRenderer(doc: pdfjs.PDFDocumentProxy | null) {
         const viewport = page.getViewport({ scale });
         if (!Number.isFinite(viewport.width) || !Number.isFinite(viewport.height)) return;
 
+        // Linux WebKitGTK shares Cairo/GBM surface memory across 3 stacked canvases;
+        // tighter caps prevent OOM / WebKitWebProcess crashes at high zoom.
+        const linuxWk = isLinuxWebKit();
         const safe = computeSafeCanvasSize(
           viewport.width,
           viewport.height,
           window.devicePixelRatio || 1,
+          linuxWk ? 2560 : 4096,
+          linuxWk ? 5_000_000 : 12_000_000,
         );
         canvas.width = safe.width;
         canvas.height = safe.height;
@@ -172,14 +190,22 @@ export function usePageRenderer(doc: pdfjs.PDFDocumentProxy | null) {
 
         const ctx = canvas.getContext('2d');
         if (!ctx || gen !== renderGenRef.current) return;
-        ctx.setTransform(safe.scaleX, 0, 0, safe.scaleY, 0, 0);
 
+        ctx.setTransform(safe.scaleX, 0, 0, safe.scaleY, 0, 0);
         const task = page.render({ canvasContext: ctx, viewport });
         renderTaskRef.current = task;
         await task.promise;
         if (renderTaskRef.current === task) {
           renderTaskRef.current = null;
         }
+        logInfo('pdf', 'Page rendered', {
+          page: pageIndex + 1,
+          scale: Math.round(scale * 100) / 100,
+          canvasW: safe.width,
+          canvasH: safe.height,
+          renderMs:
+            typeof performance !== 'undefined' ? Math.round(performance.now() - t0) : undefined,
+        });
       } catch (err) {
         const name = (err as { name?: string })?.name ?? '';
         const message = (err as { message?: string })?.message ?? '';
@@ -188,6 +214,11 @@ export function usePageRenderer(doc: pdfjs.PDFDocumentProxy | null) {
           name !== 'RenderingCancelledException' &&
           !/Rendering cancelled|Transport destroyed/i.test(message)
         ) {
+          logError('pdf', 'Page render failed', {
+            page: pageIndex + 1,
+            name,
+            message,
+          });
           throw err;
         }
       } finally {
