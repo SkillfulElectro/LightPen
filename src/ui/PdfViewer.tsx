@@ -1,7 +1,7 @@
 /**
  * PDF viewer: pdf.js page canvas + committed/incremental ink canvas + lightweight cursor canvas.
  *
- * Crash & FPS fixes (v0.1.10):
+ * Crash & FPS fixes (v0.1.11):
  * - Drops `desynchronized: true` on 2D overlay canvases (triggered WebKitGTK/NVIDIA
  *   compositor crashes & stalls on Linux AppImages) and caches 2D contexts once.
  * - Uses O(1) incremental live stroke segment drawing onto `inkCanvasRef` and
@@ -306,6 +306,8 @@ export default function PdfViewer({ pdfBytes, pdfName, onPdfLoaded }: Props) {
   // ---- live overlay: O(1) incremental live stroke on ink canvas + dirty-rect cursor ----
   useEffect(() => {
     let raf = 0;
+    lastCursorSigRef.current = '';
+    lastCursorBoxRef.current = null;
     const linuxWk = isLinuxWebKit();
     const inkSafe = computeSafeCanvasSize(
       cssW,

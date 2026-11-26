@@ -373,7 +373,7 @@ export function SettingsDialog() {
           <button
             type="button"
             onClick={() => {
-              void getFullDiagnosticReport({ Version: '0.1.10', Hardware: hwSummary })
+              void getFullDiagnosticReport({ Version: '0.1.11', Hardware: hwSummary })
                 .then(async (report) => {
                   if (navigator.clipboard?.writeText) {
                     await navigator.clipboard.writeText(report);
@@ -390,7 +390,7 @@ export function SettingsDialog() {
           <button
             type="button"
             onClick={() => {
-              void getFullDiagnosticReport({ Version: '0.1.10', Hardware: hwSummary })
+              void getFullDiagnosticReport({ Version: '0.1.11', Hardware: hwSummary })
                 .then((report) =>
                   saveBytesAs('lightpen-diagnostics.log', new TextEncoder().encode(report)),
                 )

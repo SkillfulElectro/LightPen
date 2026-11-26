@@ -117,7 +117,7 @@ export function resolveExecutionPlan(
   const softwareGpu = caps.isSoftwareGpu ?? isSoftwareGpuRenderer(caps.gpuRenderer);
   const gpuUsable = (caps.hasWebGL2 || caps.hasWebGL) && !softwareGpu;
   const multiCore = caps.cpuCores >= 2;
-  const cpuWidth = caps.cpuCores >= 6 ? 320 : 256;
+  const cpuWidth = caps.cpuCores >= 6 ? 384 : 320;
 
   if (preferred === 'cpu') {
     return {
@@ -135,7 +135,7 @@ export function resolveExecutionPlan(
         delegate: 'GPU',
         label: 'GPU',
         hybrid: false,
-        inputWidth: linuxWebKit ? 320 : 384,
+        inputWidth: 384,
         preferVideoSource: !linuxWebKit,
       };
     }
@@ -150,15 +150,16 @@ export function resolveExecutionPlan(
 
   // Hybrid CPU + GPU mode (default):
   // Never run WebGL2 GPU delegate on a CPU software rasterizer (e.g. Mesa llvmpipe).
-  // On Linux WebKitGTK with a real GPU, keep 320px 2D canvas readback (ADR-025) and rely
-  // on InferenceLoadBalancer's fast GPU -> CPU failover if WebKitGTK EGL readback stalls.
+  // On Linux WebKitGTK with a real GPU, keep 384px CPU-backed 2D canvas readback (ADR-025)
+  // so hands at desk distance stay crisp for palm detection, and rely on
+  // InferenceLoadBalancer's post-warmup GPU -> CPU failover if WebKitGTK GL stalls.
   const canUseGpu = linuxWebKit ? caps.hasWebGL2 && !softwareGpu : gpuUsable;
   if (canUseGpu) {
     return {
       delegate: 'GPU',
       label: multiCore ? 'CPU+GPU' : 'GPU',
       hybrid: true,
-      inputWidth: linuxWebKit ? 320 : multiCore ? 384 : 320,
+      inputWidth: multiCore ? 384 : 320,
       preferVideoSource: !linuxWebKit,
     };
   }
@@ -189,13 +190,16 @@ export interface LoadBalanceAction {
 export class InferenceLoadBalancer {
   private emaMs = 12;
   private slowStreak = 0;
+  private framesSeen = 0;
   private currentWidth: number;
-  private readonly minWidth = 224;
+  private readonly minWidth = 320;
   private readonly maxWidth: number;
+  private readonly warmupFrames: number;
 
-  constructor(initialWidth = 384) {
+  constructor(initialWidth = 384, warmupFrames = 15) {
     this.currentWidth = Math.max(this.minWidth, initialWidth);
     this.maxWidth = this.currentWidth;
+    this.warmupFrames = Math.max(0, Math.floor(warmupFrames));
   }
 
   get averageInferenceMs(): number {
@@ -209,6 +213,7 @@ export class InferenceLoadBalancer {
   reset(width?: number): void {
     this.emaMs = 12;
     this.slowStreak = 0;
+    this.framesSeen = 0;
     if (width !== undefined) {
       this.currentWidth = Math.max(this.minWidth, width);
     }
@@ -224,19 +229,25 @@ export class InferenceLoadBalancer {
       };
     }
 
+    this.framesSeen += 1;
     this.emaMs = this.emaMs * 0.78 + durationMs * 0.22;
 
-    // Step down input width promptly if inference approaches 30 FPS budget (>24ms)
+    // Step down input width promptly if inference approaches 30 FPS budget (>24ms),
+    // while never dropping below 320px so palm detection remains reliable at desk distance.
     if (this.emaMs > 24 && this.currentWidth > this.minWidth) {
       this.currentWidth = Math.max(this.minWidth, this.currentWidth - 32);
     } else if (this.emaMs < 11 && this.currentWidth < this.maxWidth) {
       this.currentWidth = Math.min(this.maxWidth, this.currentWidth + 16);
     }
 
-    // Track sustained GPU stalls (>40ms per frame => <25 FPS) in hybrid mode
-    // so WebKitGTK/NVIDIA GL readback stalls fail over to fast multi-core CPU XNNPACK
-    // instead of remaining trapped at ~16 FPS.
-    if (hybrid && activeDelegate === 'GPU' && this.emaMs > 40) {
+    // Track sustained GPU stalls (>40ms per frame => <25 FPS) in hybrid mode after
+    // initial WebGL shader warmup so transient startup spikes never kick off the GPU.
+    if (
+      this.framesSeen > this.warmupFrames &&
+      hybrid &&
+      activeDelegate === 'GPU' &&
+      this.emaMs > 40
+    ) {
       this.slowStreak += 1;
     } else {
       this.slowStreak = Math.max(0, this.slowStreak - 1);

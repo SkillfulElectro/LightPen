@@ -36,13 +36,15 @@ describe('resolveExecutionPlan', () => {
     expect(plan.label).toBe('CPU+GPU');
     expect(plan.hybrid).toBe(true);
     expect(plan.preferVideoSource).toBe(true);
+    expect(plan.inputWidth).toBe(384);
   });
 
-  it('uses GPU + 2D canvas readback on Linux WebKitGTK when WebGL2 is available', () => {
+  it('uses GPU + 384px 2D canvas readback on Linux WebKitGTK when WebGL2 is available', () => {
     const plan = resolveExecutionPlan('hybrid', FULL_CAPS, true);
     expect(plan.delegate).toBe('GPU');
     expect(plan.label).toBe('CPU+GPU');
     expect(plan.preferVideoSource).toBe(false);
+    expect(plan.inputWidth).toBe(384);
   });
 
   it('falls back cleanly to CPU when no WebGL GPU is available', () => {
@@ -67,11 +69,11 @@ describe('resolveExecutionPlan', () => {
   it('honors explicit cpu and gpu preferences across hardware profiles', () => {
     expect(resolveExecutionPlan('cpu', FULL_CAPS, false)).toMatchObject({
       delegate: 'CPU',
-      inputWidth: 320,
+      inputWidth: 384,
     });
     expect(resolveExecutionPlan('cpu', CPU_ONLY_CAPS, false)).toMatchObject({
       delegate: 'CPU',
-      inputWidth: 256,
+      inputWidth: 320,
     });
     expect(resolveExecutionPlan('gpu', FULL_CAPS, false)).toMatchObject({
       label: 'GPU',
@@ -80,7 +82,7 @@ describe('resolveExecutionPlan', () => {
     });
     expect(resolveExecutionPlan('gpu', FULL_CAPS, true)).toMatchObject({
       label: 'GPU',
-      inputWidth: 320,
+      inputWidth: 384,
       preferVideoSource: false,
     });
     expect(resolveExecutionPlan('gpu', CPU_ONLY_CAPS, false)).toMatchObject({
@@ -96,12 +98,13 @@ describe('resolveExecutionPlan', () => {
 });
 
 describe('InferenceLoadBalancer', () => {
-  it('scales down input width when inference exceeds frame budget and recovers when fast', () => {
+  it('scales down input width within safe >=320px floor and recovers when fast', () => {
     const lb = new InferenceLoadBalancer(512);
     for (let i = 0; i < 15; i++) {
       lb.record(40, 'GPU', true);
     }
     expect(lb.inputWidth).toBeLessThan(512);
+    expect(lb.inputWidth).toBeGreaterThanOrEqual(320);
     const reduced = lb.inputWidth;
     for (let i = 0; i < 20; i++) {
       lb.record(6, 'GPU', true);
@@ -109,21 +112,28 @@ describe('InferenceLoadBalancer', () => {
     expect(lb.inputWidth).toBeGreaterThan(reduced);
   });
 
-  it('triggers GPU -> CPU failover only after sustained GPU stalls in hybrid mode', () => {
-    const lb = new InferenceLoadBalancer(512);
-    let triggered = false;
-    for (let i = 0; i < 35; i++) {
-      const action = lb.record(110, 'GPU', true);
-      if (action.shouldFallbackToCpu) {
-        triggered = true;
+  it('ignores initial WebGL shader warmup spikes before triggering GPU -> CPU failover', () => {
+    const lb = new InferenceLoadBalancer(384, 15);
+    let prematureFailover = false;
+    for (let i = 0; i < 15; i++) {
+      if (lb.record(120, 'GPU', true).shouldFallbackToCpu) {
+        prematureFailover = true;
+      }
+    }
+    expect(prematureFailover).toBe(false);
+
+    let failoverAfterWarmup = false;
+    for (let i = 0; i < 20; i++) {
+      if (lb.record(62, 'GPU', true).shouldFallbackToCpu) {
+        failoverAfterWarmup = true;
         break;
       }
     }
-    expect(triggered).toBe(true);
+    expect(failoverAfterWarmup).toBe(true);
   });
 
   it('fails over to CPU on sustained ~16 FPS (62ms) GPU stalls without 30->15 FPS frame skipping', () => {
-    const lb = new InferenceLoadBalancer(320);
+    const lb = new InferenceLoadBalancer(384, 0);
     let failover = false;
     let skippedAt62ms = false;
     for (let i = 0; i < 20; i++) {

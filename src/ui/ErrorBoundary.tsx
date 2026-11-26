@@ -40,7 +40,7 @@ export default class ErrorBoundary extends Component<Props, State> {
   };
 
   private saveLogs = () => {
-    void getFullDiagnosticReport({ Version: '0.1.10', Trigger: 'error-boundary' })
+    void getFullDiagnosticReport({ Version: '0.1.11', Trigger: 'error-boundary' })
       .then((text) => saveBytesAs('lightpen-diagnostics.log', new TextEncoder().encode(text)))
       .catch(() => {
         // ignore save cancellation
