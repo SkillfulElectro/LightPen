@@ -7,7 +7,7 @@ import './index.css';
 
 installGlobalErrorLogging();
 logInfo('startup', 'LightPen frontend booting', {
-  version: '0.1.10',
+  version: '0.1.11',
   userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : 'unknown',
   dpr: typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1,
   viewport:

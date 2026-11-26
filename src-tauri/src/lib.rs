@@ -175,25 +175,25 @@ fn detect_nvidia_driver() -> Option<String> {
     None
 }
 
-/// Apply Linux WebKitGTK stability defaults before GTK/WebKit initializes.
+/// Log Linux graphics/WebKitGTK environment before GTK/WebKit initializes.
 ///
-/// WebKitGTK 2.42+ DMA-BUF compositing on NVIDIA proprietary drivers often
-/// causes ~15 FPS stalls or `WebKitWebProcess` crashes during rapid canvas
-/// updates. Disabling DMA-BUF on detected NVIDIA hosts avoids those crashes
-/// while keeping hardware compositing active; users can opt out with
-/// `LIGHTPEN_KEEP_DMABUF=1`.
+/// Never forces `WEBKIT_DISABLE_DMABUF_RENDERER=1` automatically: on modern
+/// WebKitGTK + NVIDIA hosts, disabling DMA-BUF can break WebGL2 / texture
+/// uploads so MediaPipe stops receiving camera frames. Users who want to test
+/// without DMA-BUF can opt in explicitly via `LIGHTPEN_DISABLE_DMABUF=1` or
+/// `WEBKIT_DISABLE_DMABUF_RENDERER=1`.
 #[cfg(target_os = "linux")]
 fn configure_linux_webkit_env() {
     let nvidia = detect_nvidia_driver();
     let dmabuf_before = non_empty_env("WEBKIT_DISABLE_DMABUF_RENDERER");
-    let keep_dmabuf = non_empty_env("LIGHTPEN_KEEP_DMABUF").as_deref() == Some("1");
+    let opt_in_disable_dmabuf = non_empty_env("LIGHTPEN_DISABLE_DMABUF").as_deref() == Some("1");
 
-    if nvidia.is_some() && dmabuf_before.is_none() && !keep_dmabuf {
+    if opt_in_disable_dmabuf && dmabuf_before.is_none() {
         std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
         log_line(
             "info",
             "linux-webkit",
-            "NVIDIA GPU detected; set WEBKIT_DISABLE_DMABUF_RENDERER=1 (set LIGHTPEN_KEEP_DMABUF=1 to override)",
+            "LIGHTPEN_DISABLE_DMABUF=1 set; enabled WEBKIT_DISABLE_DMABUF_RENDERER=1",
             None,
         );
     }

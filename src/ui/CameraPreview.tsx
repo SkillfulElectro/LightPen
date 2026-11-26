@@ -59,6 +59,8 @@ import {
   getHandLandmarker,
   getTargetInputWidth,
   hasDetectedHand,
+  hasLiveFramePixels,
+  isLandmarkerClosed,
   resetDetectionSession,
   setInferenceInputWidth,
 } from '../platform/mediapipe';
@@ -349,8 +351,13 @@ export default function CameraPreview({ pageSize, onGesture }: Props) {
             loadBalancer.reset(getTargetInputWidth());
             setTracking({ backend: getActiveBackendLabel() });
           })
-          .catch(() => {
-            // Keep existing landmarker if CPU init fails; health check will report it.
+          .catch((err) => {
+            // Keep existing live landmarker if CPU init fails; reset balancer to avoid thrashing.
+            loadBalancer.reset(getTargetInputWidth());
+            logWarn('mediapipe', 'CPU fallback failed; keeping existing landmarker', {
+              reason,
+              error: err instanceof Error ? err.message : String(err),
+            });
           })
           .finally(() => {
             switchingBackend = false;
@@ -400,6 +407,28 @@ export default function CameraPreview({ pageSize, onGesture }: Props) {
           // Never invoke detectForVideo while a delegate switch/failover is closing
           // and recreating the WASM HandLandmarker (prevents Use-After-Free crashes).
           if (switchingBackend) return;
+
+          // Self-heal if the active landmarker was unexpectedly closed so tracking
+          // can never enter a silent zero-detection blackout.
+          if (isLandmarkerClosed(landmarker)) {
+            const liveSettings = useStore.getState().settings;
+            switchingBackend = true;
+            logWarn('mediapipe', 'Active landmarker was closed; re-acquiring instance');
+            void getHandLandmarker(liveSettings.computeBackend, liveSettings.dominantHand)
+              .then((freshLm) => {
+                landmarker = freshLm;
+                consecutiveErrors = 0;
+                loadBalancer.reset(getTargetInputWidth());
+                setTracking({ backend: getActiveBackendLabel() });
+              })
+              .catch(() => {
+                // Health check will surface persistent init errors.
+              })
+              .finally(() => {
+                switchingBackend = false;
+              });
+            return;
+          }
 
           if (skipNextFrame) {
             skipNextFrame = false;
@@ -521,7 +550,8 @@ export default function CameraPreview({ pageSize, onGesture }: Props) {
               if (
                 !triedSilentCpuFallback &&
                 !hasDetectedHand() &&
-                lostFrames >= 45 &&
+                lostFrames >= 120 &&
+                getFrameSourceMode() === 'imagedata' &&
                 video.videoWidth > 0 &&
                 getActiveDelegate() === 'GPU'
               ) {
@@ -889,6 +919,7 @@ export default function CameraPreview({ pageSize, onGesture }: Props) {
               delegate: getActiveDelegate(),
               backend: getActiveBackendLabel(),
               frameSource: getFrameSourceMode(),
+              frameHasPixels: hasLiveFramePixels(),
               inputWidth: getTargetInputWidth(),
               videoW: video.videoWidth,
               videoH: video.videoHeight,

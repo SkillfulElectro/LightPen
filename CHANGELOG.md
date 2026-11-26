@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.11] - 2026-11-25
+
+### Fixed
+
+- **Hand tracking frames not reaching MediaPipe on Linux/NVIDIA (v0.1.10 regression).** Stopped forcing `WEBKIT_DISABLE_DMABUF_RENDERER=1` automatically on NVIDIA hosts (which could break WebKitGTK WebGL2 / texture sharing; still available via `LIGHTPEN_DISABLE_DMABUF=1`), restored CPU-backed `{ willReadFrequently: true }` 2D snapshot canvas readback across all backends, added clean `video` -> `canvas` -> raw RGBA `imagedata` progression without double-inference overhead, kept snapshot width at `>= 320px` so palm detection remains accurate at desk distance, and ensured replacement `HandLandmarker` instances are created before closing the previous instance with a warmup grace window so failover can never silence hand detection.
+
 ## [0.1.10] - 2026-11-25
 
 ### Fixed
@@ -209,7 +215,8 @@ First working version.
 - **Privacy** — on-device processing only, camera stops on pause/hide, visible
   live indicator, no telemetry, strict CSP, least-privilege Tauri capabilities.
 
-[Unreleased]: https://github.com/SkillfulElectro/LightPen/compare/v0.1.10...HEAD
+[Unreleased]: https://github.com/SkillfulElectro/LightPen/compare/v0.1.11...HEAD
+[0.1.11]: https://github.com/SkillfulElectro/LightPen/compare/v0.1.10...v0.1.11
 [0.1.10]: https://github.com/SkillfulElectro/LightPen/compare/v0.1.9...v0.1.10
 [0.1.9]: https://github.com/SkillfulElectro/LightPen/compare/v0.1.8...v0.1.9
 [0.1.8]: https://github.com/SkillfulElectro/LightPen/releases/tag/v0.1.8

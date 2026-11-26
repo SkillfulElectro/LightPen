@@ -2,14 +2,14 @@
  * MediaPipe Tasks Vision HandLandmarker (bundled WASM + model, no CDN).
  * All inference is on-device; frames never leave the device.
  *
- * Hybrid CPU + GPU acceleration (v0.1.10):
+ * Hybrid CPU + GPU acceleration (v0.1.11):
  * - Probes hardware CPU core count + WebGL2/WebGL GPU renderer up front and
  *   automatically rejects CPU software WebGL renderers (llvmpipe / SwiftShader).
- * - Uses 320–384px adaptive snapshots (matching MediaPipe's 192/224px input
- *   tensors) with cached 2D contexts so Linux WebKitGTK never pays 512px
- *   software readback + re-upload penalties.
- * - Guards every `HandLandmarker` against post-close Use-After-Free during
- *   GPU -> CPU failover or backend switching.
+ * - Uses a CPU-backed `{ willReadFrequently: true }` 2D snapshot canvas (320–384px)
+ *   and steps down cleanly from `video` -> `canvas` -> raw RGBA `imagedata` so
+ *   frames always reach MediaPipe even on Linux WebKitGTK without GL video sinks.
+ * - Creates replacement `HandLandmarker` instances BEFORE closing the previous
+ *   one so a failed switch/failover can never leave tracking silently blacked out.
  * - Emits structured lifecycle diagnostics via `platform/logger`.
  */
 
@@ -37,20 +37,20 @@ export interface HandResult {
 export type FrameSourceMode = 'video' | 'canvas' | 'imagedata';
 
 let landmarkerPromise: Promise<HandLandmarker> | null = null;
+let landmarkerInitSeq = 0;
 let cachedModelBuffer: Uint8Array | null = null;
 let cachedCapabilities: ComputeCapabilities | null = null;
 let activeDelegate: 'GPU' | 'CPU' = 'GPU';
 let activeBackendLabel: ActiveComputeBackend = 'CPU+GPU';
 let currentPreferredBackend: ComputeBackend = 'hybrid';
 let currentNumHands = 1;
-let gpuSnapCanvas: HTMLCanvasElement | null = null;
-let gpuSnapCtx: CanvasRenderingContext2D | null = null;
-let cpuSnapCanvas: HTMLCanvasElement | null = null;
-let cpuSnapCtx: CanvasRenderingContext2D | null = null;
+let snapCanvas: HTMLCanvasElement | null = null;
+let snapCtx: CanvasRenderingContext2D | null = null;
 let targetInputWidth = 384;
 let frameSourceMode: FrameSourceMode = isLinuxWebKit() ? 'canvas' : 'video';
 let consecutiveEmptyFrames = 0;
 let hasDetectedAnyHand = false;
+let lastFrameHasPixels = false;
 
 /**
  * Track closed WASM instances so an in-flight frame callback can NEVER invoke
@@ -58,6 +58,10 @@ let hasDetectedAnyHand = false;
  * while writing during automatic GPU -> CPU failover).
  */
 const closedLandmarkers = new WeakSet<HandLandmarker>();
+
+export function isLandmarkerClosed(lm: HandLandmarker | null | undefined): boolean {
+  return !lm || closedLandmarkers.has(lm);
+}
 
 function safeCloseLandmarker(lm: HandLandmarker | null | undefined): void {
   if (!lm || closedLandmarkers.has(lm)) return;
@@ -72,8 +76,8 @@ function safeCloseLandmarker(lm: HandLandmarker | null | undefined): void {
 /**
  * WebKitGTK on Linux frequently lacks a hardware GL video sink (ADR-025), so
  * WebGL `texImage2D(HTMLVideoElement)` silently uploads black frames without
- * throwing. Using 2D canvas readback avoids dead 0-hand streams while still
- * allowing WebGL2 GPU inference when supported.
+ * throwing. Using CPU-backed 2D canvas / ImageData readback guarantees frames
+ * reach MediaPipe while still allowing WebGL2 GPU inference when supported.
  */
 export function isLinuxWebKit(
   userAgent: string = typeof navigator !== 'undefined' ? navigator.userAgent : '',
@@ -134,26 +138,27 @@ async function loadModelBuffer(): Promise<Uint8Array | null> {
 
 /**
  * Allocate a dedicated canvas pre-warmed with a high-performance WebGL2 context.
- * Avoids `desynchronized: true` on Linux WebKitGTK where front-buffer EGL access
- * can trigger compositor stalls or WebKitWebProcess crashes on NVIDIA drivers.
+ * On Linux WebKitGTK, keeps default RGBA alpha and avoids `desynchronized: true`
+ * so EGL/Angle textures match MediaPipe's expectations without driver stalls.
+ * Returns `undefined` if WebGL2 cannot be obtained so MediaPipe creates its own.
  */
 function createHighPerfGpuCanvas(): HTMLCanvasElement | undefined {
   if (typeof document === 'undefined') return undefined;
   try {
     const canvas = document.createElement('canvas');
     const linuxWk = isLinuxWebKit();
+    const gl = canvas.getContext('webgl2', {
+      powerPreference: 'high-performance',
+      antialias: false,
+      ...(linuxWk ? {} : { alpha: false, desynchronized: true }),
+    });
+    if (!gl) return undefined;
     canvas.addEventListener('webglcontextlost', (e) => {
       e.preventDefault();
       logWarn('mediapipe', 'WebGL context lost on GPU inference canvas');
     });
     canvas.addEventListener('webglcontextrestored', () => {
       logInfo('mediapipe', 'WebGL context restored on GPU inference canvas');
-    });
-    canvas.getContext('webgl2', {
-      powerPreference: 'high-performance',
-      antialias: false,
-      alpha: false,
-      ...(linuxWk ? {} : { desynchronized: true }),
     });
     return canvas;
   } catch {
@@ -179,9 +184,6 @@ async function createLandmarker(
         ? document.createElement('canvas')
         : undefined;
 
-  activeDelegate = delegate;
-  activeBackendLabel = delegate === 'GPU' ? (hybridLabel ? 'CPU+GPU' : 'GPU') : 'CPU';
-
   const landmarker = await HandLandmarker.createFromOptions(vision, {
     baseOptions,
     ...(canvas ? { canvas } : {}),
@@ -191,6 +193,9 @@ async function createLandmarker(
     minHandPresenceConfidence: 0.25,
     minTrackingConfidence: 0.25,
   });
+
+  activeDelegate = delegate;
+  activeBackendLabel = delegate === 'GPU' ? (hybridLabel ? 'CPU+GPU' : 'GPU') : 'CPU';
 
   const elapsedMs =
     typeof performance !== 'undefined' ? Math.round(performance.now() - t0) : undefined;
@@ -230,10 +235,13 @@ export function getHandLandmarker(
   }
 
   const prev = landmarkerPromise;
+  const prevPreferred = currentPreferredBackend;
+  const prevHands = currentNumHands;
   currentPreferredBackend = preferredBackend;
   currentNumHands = desiredHands;
   targetInputWidth = plan.inputWidth;
   frameSourceMode = plan.preferVideoSource ? 'video' : 'canvas';
+  consecutiveEmptyFrames = 0;
 
   logInfo('mediapipe', 'Resolved execution plan', {
     preferredBackend,
@@ -244,66 +252,102 @@ export function getHandLandmarker(
     desiredHands,
   });
 
-  landmarkerPromise = (async () => {
-    if (prev) {
-      try {
-        safeCloseLandmarker(await prev);
-      } catch {
-        // ignore previous close errors
-      }
-    }
-
+  const initSeq = ++landmarkerInitSeq;
+  const nextPromise = (async () => {
     try {
+      let nextLm: HandLandmarker;
       if (plan.delegate === 'CPU') {
-        return await createLandmarker('CPU', desiredHands, false);
+        nextLm = await createLandmarker('CPU', desiredHands, false);
+      } else {
+        try {
+          nextLm = await createLandmarker('GPU', desiredHands, plan.label === 'CPU+GPU');
+        } catch (gpuErr) {
+          logWarn('mediapipe', 'GPU delegate init failed; falling back to CPU', {
+            error: gpuErr instanceof Error ? gpuErr.message : String(gpuErr),
+          });
+          frameSourceMode = 'canvas';
+          targetInputWidth = Math.min(targetInputWidth, 384);
+          nextLm = await createLandmarker('CPU', desiredHands, false);
+        }
       }
-      try {
-        return await createLandmarker('GPU', desiredHands, plan.label === 'CPU+GPU');
-      } catch (gpuErr) {
-        logWarn('mediapipe', 'GPU delegate init failed; falling back to CPU', {
-          error: gpuErr instanceof Error ? gpuErr.message : String(gpuErr),
-        });
-        frameSourceMode = 'canvas';
-        targetInputWidth = Math.min(targetInputWidth, 320);
-        return await createLandmarker('CPU', desiredHands, false);
+
+      // Close previous instance ONLY after replacement succeeded so a failed init
+      // can never strand the frame loop with a closed HandLandmarker.
+      if (prev) {
+        try {
+          safeCloseLandmarker(await prev);
+        } catch {
+          // ignore previous close errors
+        }
       }
+      return nextLm;
     } catch (err) {
       logError('mediapipe', 'HandLandmarker initialization failed', {
         error: err instanceof Error ? err.message : String(err),
       });
-      // Never cache a rejected promise: allow the user to retry cleanly.
-      landmarkerPromise = null;
+      // Restore previous live promise if no newer init superseded us.
+      if (landmarkerInitSeq === initSeq) {
+        landmarkerPromise = prev;
+        currentPreferredBackend = prevPreferred;
+        currentNumHands = prevHands;
+      }
       throw err;
     }
   })();
 
-  return landmarkerPromise;
+  landmarkerPromise = nextPromise;
+  return nextPromise;
 }
 
 /** Switch to CPU delegate if GPU created cleanly but fails or stalls at runtime. */
 export async function fallbackToCpuLandmarker(reason = 'runtime-stall'): Promise<HandLandmarker> {
+  const prev = landmarkerPromise;
+  const prevSource = frameSourceMode;
+  const prevWidth = targetInputWidth;
+
   logWarn('mediapipe', 'Falling back from GPU to CPU delegate', {
     reason,
-    previousWidth: targetInputWidth,
-    previousSource: frameSourceMode,
+    previousWidth: prevWidth,
+    previousSource: prevSource,
   });
-  await closeHandLandmarker();
-  frameSourceMode = 'canvas';
+
+  // Preserve `imagedata` if we already stepped down to it; otherwise use `canvas`.
+  frameSourceMode = prevSource === 'imagedata' ? 'imagedata' : 'canvas';
   consecutiveEmptyFrames = 0;
-  targetInputWidth = Math.min(targetInputWidth, 320);
-  landmarkerPromise = createLandmarker('CPU', currentNumHands, false).catch((err) => {
-    landmarkerPromise = null;
-    logError('mediapipe', 'CPU fallback initialization failed', {
-      error: err instanceof Error ? err.message : String(err),
+  targetInputWidth = Math.min(Math.max(targetInputWidth, 320), 384);
+
+  const initSeq = ++landmarkerInitSeq;
+  const nextPromise = createLandmarker('CPU', currentNumHands, false)
+    .then(async (cpuLm) => {
+      if (prev) {
+        try {
+          safeCloseLandmarker(await prev);
+        } catch {
+          // ignore previous close errors
+        }
+      }
+      return cpuLm;
+    })
+    .catch((err) => {
+      // Restore the still-live previous landmarker instead of leaving tracking dead.
+      if (landmarkerInitSeq === initSeq) {
+        landmarkerPromise = prev;
+        frameSourceMode = prevSource;
+        targetInputWidth = prevWidth;
+      }
+      logError('mediapipe', 'CPU fallback initialization failed', {
+        error: err instanceof Error ? err.message : String(err),
+      });
+      throw err;
     });
-    throw err;
-  });
-  return landmarkerPromise;
+
+  landmarkerPromise = nextPromise;
+  return nextPromise;
 }
 
 /** Dynamically adjust snapshot canvas width for hybrid load balancing. */
 export function setInferenceInputWidth(width: number): void {
-  if (Number.isFinite(width) && width >= 192 && width <= 640) {
+  if (Number.isFinite(width) && width >= 256 && width <= 640) {
     targetInputWidth = Math.round(width);
   }
 }
@@ -328,11 +372,18 @@ export function hasDetectedHand(): boolean {
   return hasDetectedAnyHand;
 }
 
+export function hasLiveFramePixels(): boolean {
+  return lastFrameHasPixels;
+}
+
 /** Reset per-session adaptive readback counters when starting a fresh camera session. */
 export function resetDetectionSession(): void {
-  frameSourceMode = isLinuxWebKit() ? 'canvas' : 'video';
+  frameSourceMode = isLinuxWebKit() || activeDelegate === 'CPU' ? 'canvas' : 'video';
   consecutiveEmptyFrames = 0;
   hasDetectedAnyHand = false;
+  lastFrameHasPixels = false;
+  snapCanvas = null;
+  snapCtx = null;
 }
 
 const lastTimestamp = new WeakMap<HandLandmarker, number>();
@@ -393,44 +444,54 @@ export function pickBestHand(
   return select(true) ?? select(false);
 }
 
+/** Fast 9-point check that an ImageData buffer contains non-black RGB pixels. */
+export function imageDataHasPixels(imgData: ImageData | null | undefined): boolean {
+  const data = imgData?.data;
+  if (!data || data.length < 4) return false;
+  const totalPixels = Math.floor(data.length / 4);
+  const step = Math.max(1, Math.floor(totalPixels / 9));
+  for (let p = 0; p < totalPixels; p += step) {
+    const idx = p * 4;
+    if ((data[idx] ?? 0) > 2 || (data[idx + 1] ?? 0) > 2 || (data[idx + 2] ?? 0) > 2) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Draw the current video frame onto a CPU-backed `{ willReadFrequently: true }`
+ * 2D canvas. Using a CPU-backed surface guarantees reliable pixel readback on
+ * Linux WebKitGTK (where GStreamer decodes frames on CPU without a GL sink)
+ * both for `texImage2D(canvas)` and `getImageData`.
+ */
 function getVideoSnapshotCanvas(
   video: HTMLVideoElement,
-  cpuReadback: boolean,
 ): { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D } | null {
   if (typeof document === 'undefined' || video.videoWidth <= 0 || video.videoHeight <= 0) {
     return null;
   }
 
-  let canvas: HTMLCanvasElement | null;
-  let ctx: CanvasRenderingContext2D | null;
-  if (cpuReadback) {
-    if (!cpuSnapCanvas) {
-      cpuSnapCanvas = document.createElement('canvas');
-      cpuSnapCtx = cpuSnapCanvas.getContext('2d', { willReadFrequently: true });
-    }
-    canvas = cpuSnapCanvas;
-    ctx = cpuSnapCtx ?? canvas.getContext('2d', { willReadFrequently: true });
-    cpuSnapCtx = ctx;
-  } else {
-    if (!gpuSnapCanvas) {
-      gpuSnapCanvas = document.createElement('canvas');
-      gpuSnapCtx = gpuSnapCanvas.getContext('2d');
-    }
-    canvas = gpuSnapCanvas;
-    ctx = gpuSnapCtx ?? canvas.getContext('2d');
-    gpuSnapCtx = ctx;
+  if (!snapCanvas) {
+    snapCanvas = document.createElement('canvas');
+    snapCtx = null;
   }
-
-  if (!canvas || !ctx) return null;
 
   const targetW = Math.min(video.videoWidth, targetInputWidth);
   const targetH = Math.max(1, Math.round((video.videoHeight / video.videoWidth) * targetW));
-  if (canvas.width !== targetW || canvas.height !== targetH) {
-    canvas.width = targetW;
-    canvas.height = targetH;
+  if (snapCanvas.width !== targetW || snapCanvas.height !== targetH) {
+    snapCanvas.width = targetW;
+    snapCanvas.height = targetH;
+    // Re-fetch context after resize so WebKitGTK binds the fresh backing buffer.
+    snapCtx = null;
   }
+
+  const ctx = snapCtx ?? snapCanvas.getContext('2d', { willReadFrequently: true });
+  snapCtx = ctx;
+  if (!ctx) return null;
+
   ctx.drawImage(video, 0, 0, targetW, targetH);
-  return { canvas, ctx };
+  return { canvas: snapCanvas, ctx };
 }
 
 function runWithSource(
@@ -438,17 +499,28 @@ function runWithSource(
   video: HTMLVideoElement,
   nowMs: number,
   mode: FrameSourceMode,
+  checkPixels = false,
 ) {
   const ts = nextTimestamp(landmarker, nowMs);
   if (mode === 'video') {
     return landmarker.detectForVideo(video, ts);
   }
-  const needsCpuReadback = mode === 'imagedata' || activeDelegate === 'CPU';
-  const snap = getVideoSnapshotCanvas(video, needsCpuReadback);
+  const snap = getVideoSnapshotCanvas(video);
   if (!snap) return landmarker.detectForVideo(video, ts);
   if (mode === 'imagedata') {
     const imgData = snap.ctx.getImageData(0, 0, snap.canvas.width, snap.canvas.height);
+    if (checkPixels || !lastFrameHasPixels) {
+      lastFrameHasPixels = imageDataHasPixels(imgData);
+    }
     return landmarker.detectForVideo(imgData, ts);
+  }
+  if (checkPixels) {
+    try {
+      const sample = snap.ctx.getImageData(0, 0, snap.canvas.width, snap.canvas.height);
+      lastFrameHasPixels = imageDataHasPixels(sample);
+    } catch {
+      // Ignore readback errors during optional diagnostic sampling.
+    }
   }
   return landmarker.detectForVideo(snap.canvas, ts);
 }
@@ -464,12 +536,15 @@ export function detectHand(
   if (closedLandmarkers.has(landmarker)) return null;
   if (video.readyState < 2 || video.videoWidth === 0 || video.videoHeight === 0) return null;
 
+  const shouldSamplePixels =
+    !lastFrameHasPixels && (consecutiveEmptyFrames === 0 || consecutiveEmptyFrames === 12);
+
   let result;
   try {
-    result = runWithSource(landmarker, video, nowMs, frameSourceMode);
+    result = runWithSource(landmarker, video, nowMs, frameSourceMode, shouldSamplePixels);
   } catch (err) {
     // Hardware-decoded <video> or canvas texture readback failed: step down to
-    // 2D canvas, then raw ImageData, before surfacing an error.
+    // CPU-backed 2D canvas, then raw ImageData, before surfacing an error.
     const nextMode: FrameSourceMode | null =
       frameSourceMode === 'video' ? 'canvas' : frameSourceMode === 'canvas' ? 'imagedata' : null;
     if (!nextMode) throw err;
@@ -479,54 +554,69 @@ export function detectHand(
       error: err instanceof Error ? err.message : String(err),
     });
     frameSourceMode = nextMode;
-    result = runWithSource(landmarker, video, nowMs, nextMode);
+    consecutiveEmptyFrames = 0;
+    result = runWithSource(landmarker, video, nowMs, nextMode, true);
   }
 
   let landmarksList = (result.landmarks ?? []) as Landmark[][];
   let handednessList = (result.handedness ?? []) as { categoryName?: string }[][];
 
-  // Silent WebGL texImage2D(video) failure recovery: when direct video input
-  // produces sustained empty results without throwing, probe 2D canvas and
-  // ImageData readback automatically so broken video textures never stall tracking.
+  // Silent WebGL texImage2D failure recovery:
+  // If direct `<video>` or `HTMLCanvasElement` input produces sustained empty
+  // results before any hand has been seen, probe and cleanly step down to
+  // CPU-backed `canvas` and then raw RGBA `imagedata` (only on specific frames
+  // so inference is never doubled on every frame).
   if (landmarksList.length === 0) {
     consecutiveEmptyFrames += 1;
-    if (!hasDetectedAnyHand && frameSourceMode === 'video' && consecutiveEmptyFrames >= 12) {
-      try {
-        const probe = runWithSource(landmarker, video, nowMs, 'canvas');
-        const probeLm = (probe.landmarks ?? []) as Landmark[][];
-        if (probeLm.length > 0 || consecutiveEmptyFrames >= 20) {
-          logInfo('mediapipe', 'Switched frame source from video to canvas after empty frames', {
-            detectedOnProbe: probeLm.length > 0,
-            consecutiveEmptyFrames,
-          });
-          frameSourceMode = 'canvas';
-          landmarksList = probeLm;
-          handednessList = (probe.handedness ?? []) as { categoryName?: string }[][];
+    if (!hasDetectedAnyHand && frameSourceMode === 'video') {
+      if (consecutiveEmptyFrames === 12 || consecutiveEmptyFrames === 20) {
+        try {
+          const probe = runWithSource(landmarker, video, nowMs, 'canvas', true);
+          const probeLm = (probe.landmarks ?? []) as Landmark[][];
+          if (probeLm.length > 0 || consecutiveEmptyFrames >= 20) {
+            logInfo('mediapipe', 'Switched frame source from video to canvas after empty frames', {
+              detectedOnProbe: probeLm.length > 0,
+              consecutiveEmptyFrames,
+              frameHasPixels: lastFrameHasPixels,
+            });
+            frameSourceMode = 'canvas';
+            consecutiveEmptyFrames = 0;
+            landmarksList = probeLm;
+            handednessList = (probe.handedness ?? []) as { categoryName?: string }[][];
+          }
+        } catch {
+          // Ignore probe failure and keep existing source.
         }
-      } catch {
-        // Ignore probe failure and keep existing source.
       }
-    } else if (
-      !hasDetectedAnyHand &&
-      frameSourceMode === 'canvas' &&
-      consecutiveEmptyFrames >= 28
-    ) {
-      try {
-        const probe = runWithSource(landmarker, video, nowMs, 'imagedata');
-        const probeLm = (probe.landmarks ?? []) as Landmark[][];
-        if (probeLm.length > 0) {
-          logInfo('mediapipe', 'Switched frame source from canvas to imagedata after empty frames');
-          frameSourceMode = 'imagedata';
-          landmarksList = probeLm;
-          handednessList = (probe.handedness ?? []) as { categoryName?: string }[][];
+    } else if (!hasDetectedAnyHand && frameSourceMode === 'canvas') {
+      if (consecutiveEmptyFrames === 12 || consecutiveEmptyFrames === 20) {
+        try {
+          const probe = runWithSource(landmarker, video, nowMs, 'imagedata', true);
+          const probeLm = (probe.landmarks ?? []) as Landmark[][];
+          if (probeLm.length > 0 || consecutiveEmptyFrames >= 20) {
+            logInfo(
+              'mediapipe',
+              'Switched frame source from canvas to imagedata after empty frames',
+              {
+                detectedOnProbe: probeLm.length > 0,
+                consecutiveEmptyFrames,
+                frameHasPixels: lastFrameHasPixels,
+              },
+            );
+            frameSourceMode = 'imagedata';
+            consecutiveEmptyFrames = 0;
+            landmarksList = probeLm;
+            handednessList = (probe.handedness ?? []) as { categoryName?: string }[][];
+          }
+        } catch {
+          // Ignore probe failure.
         }
-      } catch {
-        // Ignore probe failure.
       }
     }
   } else {
     consecutiveEmptyFrames = 0;
     hasDetectedAnyHand = true;
+    lastFrameHasPixels = true;
   }
 
   return pickBestHand(landmarksList, handednessList, dominantHand, mirrored);

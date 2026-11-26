@@ -15,7 +15,7 @@ beforeEach(() => {
 
 describe('diagnostic logger', () => {
   it('records structured entries in order and caps the ring buffer', () => {
-    logInfo('startup', 'LightPen ready', { version: '0.1.10' });
+    logInfo('startup', 'LightPen ready', { version: '0.1.11' });
     logWarn('gpu', 'Slow GPU frame', { inferMs: 52.4 });
     logError('pdf', 'Render failed', { page: 2 });
 
@@ -35,9 +35,9 @@ describe('diagnostic logger', () => {
 
   it('builds a shareable diagnostic report with metadata and events', () => {
     logInfo('camera', 'Stream started', { width: 640, height: 480, fps: 30 });
-    const report = formatDiagnosticReport({ Version: '0.1.10', Hardware: 'Test CPU' });
+    const report = formatDiagnosticReport({ Version: '0.1.11', Hardware: 'Test CPU' });
     expect(report).toContain('=== LightPen Diagnostic Report ===');
-    expect(report).toContain('Version: 0.1.10');
+    expect(report).toContain('Version: 0.1.11');
     expect(report).toContain('Hardware: Test CPU');
     expect(report).toContain('[INFO] [camera] Stream started');
   });

@@ -78,7 +78,7 @@ export default function Toolbar({
       <div className="brand-lockup">
         <BrandNibIcon className="brand-icon" />
         <span className="brand">{t('app.title')}</span>
-        <span className="brand-version">v0.1.10</span>
+        <span className="brand-version">v0.1.11</span>
       </div>
 
       <div className="toolbar-divider" aria-hidden="true" />
